@@ -279,7 +279,10 @@ mod tests {
         let error = AggregationError::CompilationError {
             message: "guest build failed".to_string(),
         };
-        assert_eq!(error.to_string(), "zkVM compilation error: guest build failed");
+        assert_eq!(
+            error.to_string(),
+            "zkVM compilation error: guest build failed"
+        );
     }
 
     #[test]
@@ -356,7 +359,10 @@ mod tests {
             _ => panic!("Wrong error variant"),
         }
 
-        let error = AggregationError::BatchTooLarge { size: 5000, max: 1000 };
+        let error = AggregationError::BatchTooLarge {
+            size: 5000,
+            max: 1000,
+        };
         match error {
             AggregationError::BatchTooLarge { size, max } => {
                 assert_eq!(size, 5000);

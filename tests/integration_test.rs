@@ -27,8 +27,8 @@ fn test_e2e_aggregation_small_batch() {
         .map(|i| {
             let epoch = i as u32;
             let message = [i as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(&sk, epoch, &message)
-                .expect("Signing should succeed");
+            let signature =
+                XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
             VerificationItem {
                 message,
@@ -63,8 +63,8 @@ fn test_e2e_invalid_signature_rejection() {
         .map(|i| {
             let epoch = i as u32;
             let message = [i as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(&sk, epoch, &message)
-                .expect("Signing should succeed");
+            let signature =
+                XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
             VerificationItem {
                 message,
@@ -77,8 +77,8 @@ fn test_e2e_invalid_signature_rejection() {
 
     // Add an invalid signature (wrong message for epoch 5)
     let wrong_message = [99u8; MESSAGE_LENGTH];
-    let wrong_signature = XMSSSignature::sign(&sk, 5, &wrong_message)
-        .expect("Signing should succeed");
+    let wrong_signature =
+        XMSSSignature::sign(&sk, 5, &wrong_message).expect("Signing should succeed");
 
     items.push(VerificationItem {
         message: [5u8; MESSAGE_LENGTH], // Different from signed message
@@ -111,8 +111,7 @@ fn test_e2e_multi_key_aggregation() {
     for i in 0..3 {
         let epoch = i as u32;
         let message = [i as u8; MESSAGE_LENGTH];
-        let signature = XMSSSignature::sign(&sk1, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk1, epoch, &message).expect("Signing should succeed");
 
         let pk_bytes = bincode::serialize(&pk1).unwrap();
         let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
@@ -129,8 +128,7 @@ fn test_e2e_multi_key_aggregation() {
     for i in 0..3 {
         let epoch = (10 + i) as u32;
         let message = [(10 + i) as u8; MESSAGE_LENGTH];
-        let signature = XMSSSignature::sign(&sk2, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk2, epoch, &message).expect("Signing should succeed");
 
         let pk_bytes = bincode::serialize(&pk2).unwrap();
         let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
@@ -147,8 +145,7 @@ fn test_e2e_multi_key_aggregation() {
     for i in 0..3 {
         let epoch = (20 + i) as u32;
         let message = [(20 + i) as u8; MESSAGE_LENGTH];
-        let signature = XMSSSignature::sign(&sk3, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk3, epoch, &message).expect("Signing should succeed");
 
         let pk_bytes = bincode::serialize(&pk3).unwrap();
         let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
@@ -183,8 +180,8 @@ fn test_e2e_cache_loading() {
         .map(|i| {
             let epoch = i as u32;
             let message = [i as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(&sk, epoch, &message)
-                .expect("Signing should succeed");
+            let signature =
+                XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
             VerificationItem {
                 message,
@@ -201,8 +198,7 @@ fn test_e2e_cache_loading() {
     batch.public_key = Some(pk);
 
     // Serialize batch
-    let serialized = bincode::serialize(&batch)
-        .expect("Serialization should succeed");
+    let serialized = bincode::serialize(&batch).expect("Serialization should succeed");
 
     // Deserialize batch
     use sig_agg::types::AggregationBatch;
@@ -244,5 +240,8 @@ fn test_e2e_error_handling() {
     ];
 
     let result = aggregator::aggregate(items, AggregationMode::SingleKey);
-    assert!(matches!(result, Err(AggregationError::DuplicateEpoch { epoch: 0 })));
+    assert!(matches!(
+        result,
+        Err(AggregationError::DuplicateEpoch { epoch: 0 })
+    ));
 }

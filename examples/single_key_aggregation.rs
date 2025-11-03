@@ -12,7 +12,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{aggregate, AggregationMode, VerificationItem};
+use sig_agg::{AggregationMode, VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -42,8 +42,8 @@ fn main() {
         };
 
         // Sign the message
-        let signature = XMSSSignature::sign(&secret_key, epoch, &message)
-            .expect("Signing should succeed");
+        let signature =
+            XMSSSignature::sign(&secret_key, epoch, &message).expect("Signing should succeed");
 
         println!("   ✓ Signed message {} at epoch {}", i, epoch);
 
@@ -59,8 +59,8 @@ fn main() {
 
     // Step 3: Aggregate signatures into a batch
     println!("3. Aggregating signatures...");
-    let mut batch = aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation should succeed");
+    let mut batch =
+        aggregate(items, AggregationMode::SingleKey).expect("Aggregation should succeed");
 
     // Set the shared public key for the batch
     batch.public_key = Some(public_key);

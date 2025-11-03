@@ -11,7 +11,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{aggregate, AggregationError, AggregationMode, VerificationItem};
+use sig_agg::{AggregationError, AggregationMode, VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -28,8 +28,8 @@ fn test_poseidon_xmss_aggregation() {
             let message = [i as u8; MESSAGE_LENGTH];
 
             // Sign with hash-sig
-            let signature = XMSSSignature::sign(&sk, epoch, &message)
-                .expect("hash-sig signing should succeed");
+            let signature =
+                XMSSSignature::sign(&sk, epoch, &message).expect("hash-sig signing should succeed");
 
             VerificationItem {
                 message,
@@ -60,8 +60,7 @@ fn test_hash_sig_signature_verification() {
     let epoch = 5u32;
     let message = [42u8; MESSAGE_LENGTH];
 
-    let signature = XMSSSignature::sign(&sk, epoch, &message)
-        .expect("Signing should succeed");
+    let signature = XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
     // Verify using hash-sig
     let is_valid = XMSSSignature::verify(&pk, epoch, &message, &signature);
@@ -81,8 +80,8 @@ fn test_aggregation_preserves_validity() {
         .map(|i| {
             let epoch = i as u32;
             let message = [i as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(&sk, epoch, &message)
-                .expect("Signing should succeed");
+            let signature =
+                XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
             // Verify before aggregation
             assert!(
@@ -100,8 +99,7 @@ fn test_aggregation_preserves_validity() {
         .collect();
 
     // Aggregate
-    let batch = aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation should succeed");
+    let batch = aggregate(items, AggregationMode::SingleKey).expect("Aggregation should succeed");
 
     // Verify signatures are still valid after aggregation
     for item in &batch.items {
@@ -126,8 +124,8 @@ fn test_poseidon_parameter_compatibility() {
     let message = [0u8; MESSAGE_LENGTH];
 
     // Create signature with Poseidon-based XMSS
-    let signature = XMSSSignature::sign(&sk, epoch, &message)
-        .expect("Poseidon XMSS signing should succeed");
+    let signature =
+        XMSSSignature::sign(&sk, epoch, &message).expect("Poseidon XMSS signing should succeed");
 
     // Verify
     let is_valid = XMSSSignature::verify(&pk, epoch, &message, &signature);

@@ -12,7 +12,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{aggregate, AggregationMode, VerificationItem};
+use sig_agg::{AggregationMode, VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -41,8 +41,7 @@ fn main() {
         let epoch = i as u32;
         let message = create_message(b'A', i);
 
-        let signature = XMSSSignature::sign(&sk1, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk1, epoch, &message).expect("Signing should succeed");
 
         // Clone public key via serialization
         let pk_clone = clone_public_key(&pk1);
@@ -62,8 +61,7 @@ fn main() {
         let epoch = i as u32;
         let message = create_message(b'B', i);
 
-        let signature = XMSSSignature::sign(&sk2, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk2, epoch, &message).expect("Signing should succeed");
 
         let pk_clone = clone_public_key(&pk2);
 
@@ -82,8 +80,7 @@ fn main() {
         let epoch = i as u32;
         let message = create_message(b'C', i);
 
-        let signature = XMSSSignature::sign(&sk3, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(&sk3, epoch, &message).expect("Signing should succeed");
 
         let pk_clone = clone_public_key(&pk3);
 
@@ -100,8 +97,7 @@ fn main() {
 
     // Step 3: Aggregate signatures from all signers
     println!("3. Aggregating signatures from multiple keys...");
-    let batch = aggregate(items, AggregationMode::MultiKey)
-        .expect("Aggregation should succeed");
+    let batch = aggregate(items, AggregationMode::MultiKey).expect("Aggregation should succeed");
 
     println!("   ✓ Created batch with {} signatures", batch.items.len());
     println!("   ✓ Mode: {:?}", batch.mode);

@@ -7,7 +7,7 @@
 //! Criterion due to their long execution time (30-60 seconds each).
 //! Those are measured in the main benchmark binary (src/jolt/src/main.rs).
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use hashsig::{
     MESSAGE_LENGTH,
     signature::{
@@ -15,7 +15,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{aggregate, AggregationMode, VerificationItem};
+use sig_agg::{AggregationMode, VerificationItem, aggregate};
 use std::sync::OnceLock;
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
@@ -44,8 +44,8 @@ fn generate_items(count: usize, include_pk: bool) -> Vec<VerificationItem> {
         .map(|i| {
             let epoch = i as u32;
             let message = [epoch as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(sk, epoch, &message)
-                .expect("Signing should succeed");
+            let signature =
+                XMSSSignature::sign(sk, epoch, &message).expect("Signing should succeed");
 
             VerificationItem {
                 message,
@@ -137,12 +137,12 @@ fn bench_batch_serialization(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
             let items = generate_items(size, false);
-            let batch = aggregate(items, AggregationMode::SingleKey)
-                .expect("Aggregation should succeed");
+            let batch =
+                aggregate(items, AggregationMode::SingleKey).expect("Aggregation should succeed");
 
             b.iter(|| {
-                let serialized = black_box(bincode::serialize(&batch))
-                    .expect("Serialization should succeed");
+                let serialized =
+                    black_box(bincode::serialize(&batch)).expect("Serialization should succeed");
                 black_box(serialized.len())
             });
         });

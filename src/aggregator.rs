@@ -121,11 +121,10 @@ pub fn validate_multi_key(items: &[VerificationItem]) -> Result<(), AggregationE
     for item in items {
         if let Some(ref pk) = item.public_key {
             // Serialize the public key to use as a hash key
-            let pk_bytes = bincode::serialize(pk).map_err(|e| {
-                AggregationError::SerializationError {
+            let pk_bytes =
+                bincode::serialize(pk).map_err(|e| AggregationError::SerializationError {
                     message: format!("Failed to serialize public key: {}", e),
-                }
-            })?;
+                })?;
 
             let pair = (pk_bytes.clone(), item.epoch);
             if !key_epoch_pairs.insert(pair) {
@@ -309,8 +308,7 @@ mod tests {
         let (pk, sk) = get_test_keypair();
 
         let message = [epoch as u8; MESSAGE_LENGTH];
-        let signature = XMSSSignature::sign(sk, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(sk, epoch, &message).expect("Signing should succeed");
 
         VerificationItem {
             message,
@@ -421,12 +419,10 @@ mod tests {
         let (pk, sk) = get_test_keypair();
 
         let message1 = [1u8; MESSAGE_LENGTH];
-        let signature1 = XMSSSignature::sign(sk, 5, &message1)
-            .expect("Signing should succeed");
+        let signature1 = XMSSSignature::sign(sk, 5, &message1).expect("Signing should succeed");
 
         let message2 = [2u8; MESSAGE_LENGTH]; // Different message
-        let signature2 = XMSSSignature::sign(sk, 5, &message2)
-            .expect("Signing should succeed");
+        let signature2 = XMSSSignature::sign(sk, 5, &message2).expect("Signing should succeed");
 
         // Serialize and deserialize to get a "copy" of the public key
         let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
@@ -469,10 +465,8 @@ mod tests {
         let (pk2, sk2) = get_test_keypair_2();
 
         let message = [5u8; MESSAGE_LENGTH];
-        let signature1 = XMSSSignature::sign(sk1, 5, &message)
-            .expect("Signing should succeed");
-        let signature2 = XMSSSignature::sign(sk2, 5, &message)
-            .expect("Signing should succeed");
+        let signature1 = XMSSSignature::sign(sk1, 5, &message).expect("Signing should succeed");
+        let signature2 = XMSSSignature::sign(sk2, 5, &message).expect("Signing should succeed");
 
         let pk1_clone = bincode::deserialize::<_>(&bincode::serialize(pk1).unwrap()).unwrap();
         let pk2_clone = bincode::deserialize::<_>(&bincode::serialize(pk2).unwrap()).unwrap();
@@ -501,12 +495,10 @@ mod tests {
         let (pk, sk) = get_test_keypair();
 
         let message1 = [1u8; MESSAGE_LENGTH];
-        let signature1 = XMSSSignature::sign(sk, 0, &message1)
-            .expect("Signing should succeed");
+        let signature1 = XMSSSignature::sign(sk, 0, &message1).expect("Signing should succeed");
 
         let message2 = [2u8; MESSAGE_LENGTH];
-        let signature2 = XMSSSignature::sign(sk, 1, &message2)
-            .expect("Signing should succeed");
+        let signature2 = XMSSSignature::sign(sk, 1, &message2).expect("Signing should succeed");
 
         // Serialize and deserialize to get a "copy" of the public key
         let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");

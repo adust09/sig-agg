@@ -348,8 +348,7 @@ mod tests {
 
         let message = [42u8; MESSAGE_LENGTH];
         let epoch = 5u32;
-        let signature = XMSSSignature::sign(sk, epoch, &message)
-            .expect("Signing should succeed");
+        let signature = XMSSSignature::sign(sk, epoch, &message).expect("Signing should succeed");
 
         // Clone pk for the item
         let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
@@ -366,8 +365,8 @@ mod tests {
         let serialized = bincode::serialize(&item).expect("Serialization should succeed");
 
         // Test deserialization
-        let deserialized: VerificationItem = bincode::deserialize(&serialized)
-            .expect("Deserialization should succeed");
+        let deserialized: VerificationItem =
+            bincode::deserialize(&serialized).expect("Deserialization should succeed");
 
         // Verify fields match
         assert_eq!(deserialized.message, item.message);
@@ -409,8 +408,8 @@ mod tests {
         let serialized = bincode::serialize(&batch).expect("Serialization should succeed");
 
         // Test deserialization
-        let deserialized: AggregationBatch = bincode::deserialize(&serialized)
-            .expect("Deserialization should succeed");
+        let deserialized: AggregationBatch =
+            bincode::deserialize(&serialized).expect("Deserialization should succeed");
 
         assert_eq!(deserialized.mode, AggregationMode::SingleKey);
         assert!(deserialized.public_key.is_some());
@@ -437,8 +436,8 @@ mod tests {
         let serialized = bincode::serialize(&proof).expect("Serialization should succeed");
 
         // Test deserialization
-        let deserialized: AggregationProof = bincode::deserialize(&serialized)
-            .expect("Deserialization should succeed");
+        let deserialized: AggregationProof =
+            bincode::deserialize(&serialized).expect("Deserialization should succeed");
 
         assert_eq!(deserialized.proof, proof.proof);
         assert_eq!(deserialized.verified_count, 100);

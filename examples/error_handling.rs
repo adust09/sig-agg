@@ -12,7 +12,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{aggregate, AggregationError, AggregationMode, VerificationItem};
+use sig_agg::{AggregationError, AggregationMode, VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -98,8 +98,7 @@ fn test_missing_public_key() {
     let (_, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
 
     let message = [1u8; MESSAGE_LENGTH];
-    let signature = XMSSSignature::sign(&sk, 0, &message)
-        .expect("Signing should succeed");
+    let signature = XMSSSignature::sign(&sk, 0, &message).expect("Signing should succeed");
 
     let items = vec![VerificationItem {
         message,
@@ -182,7 +181,10 @@ fn test_error_recovery() {
         match aggregate(good_items, AggregationMode::SingleKey) {
             Ok(mut batch) => {
                 batch.public_key = Some(pk);
-                println!("   ✓ Successfully created batch with {} items", batch.items.len());
+                println!(
+                    "   ✓ Successfully created batch with {} items",
+                    batch.items.len()
+                );
                 println!("   ✓ Error recovery complete!");
             }
             Err(e) => println!("   ✗ Retry failed: {}", e),
@@ -195,8 +197,7 @@ fn test_error_recovery() {
 /// Helper function to create a verification item
 fn create_item(sk: &<XMSSSignature as SignatureScheme>::SecretKey, epoch: u32) -> VerificationItem {
     let message = [epoch as u8; MESSAGE_LENGTH];
-    let signature = XMSSSignature::sign(sk, epoch, &message)
-        .expect("Signing should succeed");
+    let signature = XMSSSignature::sign(sk, epoch, &message).expect("Signing should succeed");
 
     VerificationItem {
         message,

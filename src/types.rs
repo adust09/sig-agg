@@ -204,6 +204,52 @@ pub struct AggregationBatch {
     pub items: Vec<VerificationItem>,
 }
 
+// Debug implementations for types containing non-Debug XMSS cryptographic primitives
+impl std::fmt::Debug for VerificationItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VerificationItem")
+            .field("epoch", &self.epoch)
+            .field(
+                "message",
+                &format_args!(
+                    "[{:02x} {:02x} {:02x} {:02x}...] ({} bytes)",
+                    self.message[0],
+                    self.message[1],
+                    self.message[2],
+                    self.message[3],
+                    self.message.len()
+                ),
+            )
+            .field("signature", &"<XMSS Signature>")
+            .field(
+                "public_key",
+                &if self.public_key.is_some() {
+                    "Some(<XMSS PublicKey>)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for AggregationBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AggregationBatch")
+            .field("mode", &self.mode)
+            .field(
+                "public_key",
+                &if self.public_key.is_some() {
+                    "Some(<XMSS PublicKey>)"
+                } else {
+                    "None"
+                },
+            )
+            .field("items", &format_args!("[{} items]", self.items.len()))
+            .finish()
+    }
+}
+
 /// Metadata about zkVM proof generation.
 ///
 /// Contains information about when and how a proof was generated, including
@@ -482,5 +528,51 @@ mod tests {
 
         assert_eq!(batch.mode, AggregationMode::SingleKey);
         assert_eq!(batch.items.len(), 1);
+    }
+
+    #[test]
+    fn test_verification_item_debug() {
+        let (pk, sk) = get_test_keypair();
+
+        let item = VerificationItem {
+            message: [0x42u8; MESSAGE_LENGTH],
+            epoch: 5,
+            signature: XMSSSignature::sign(sk, 5, &[0x42u8; MESSAGE_LENGTH])
+                .expect("Signing should succeed"),
+            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
+        };
+
+        let debug_output = format!("{:?}", item);
+        assert!(debug_output.contains("VerificationItem"));
+        assert!(debug_output.contains("epoch: 5"));
+        assert!(debug_output.contains("[42 42 42 42...]"));
+        assert!(debug_output.contains("Some(<XMSS PublicKey>)"));
+    }
+
+    #[test]
+    fn test_aggregation_batch_debug() {
+        let (pk, sk) = get_test_keypair();
+
+        let items: Vec<VerificationItem> = (0..3)
+            .map(|i| VerificationItem {
+                message: [i as u8; MESSAGE_LENGTH],
+                epoch: i,
+                signature: XMSSSignature::sign(sk, i, &[i as u8; MESSAGE_LENGTH])
+                    .expect("Signing should succeed"),
+                public_key: None,
+            })
+            .collect();
+
+        let batch = AggregationBatch {
+            mode: AggregationMode::SingleKey,
+            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
+            items,
+        };
+
+        let debug_output = format!("{:?}", batch);
+        assert!(debug_output.contains("AggregationBatch"));
+        assert!(debug_output.contains("SingleKey"));
+        assert!(debug_output.contains("Some(<XMSS PublicKey>)"));
+        assert!(debug_output.contains("[3 items]"));
     }
 }

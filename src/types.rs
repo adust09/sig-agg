@@ -74,6 +74,23 @@ pub struct AggregationProof {
 mod tests {
     use super::*;
     use hashsig::signature::SignatureScheme;
+    use std::sync::OnceLock;
+
+    // Shared test keypair to avoid expensive key generation in each test
+    static TEST_KEYPAIR: OnceLock<(
+        <XMSSSignature as SignatureScheme>::PublicKey,
+        <XMSSSignature as SignatureScheme>::SecretKey,
+    )> = OnceLock::new();
+
+    fn get_test_keypair() -> &'static (
+        <XMSSSignature as SignatureScheme>::PublicKey,
+        <XMSSSignature as SignatureScheme>::SecretKey,
+    ) {
+        TEST_KEYPAIR.get_or_init(|| {
+            let mut rng = rand::rng();
+            XMSSSignature::key_gen(&mut rng, 0, 20)
+        })
+    }
 
     #[test]
     fn test_aggregation_mode_equality() {
@@ -91,20 +108,23 @@ mod tests {
 
     #[test]
     fn test_verification_item_serde() {
-        // Generate a test key pair and signature
-        let mut rng = rand::rng();
-        let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
+        // Use shared test keypair
+        let (pk, sk) = get_test_keypair();
 
         let message = [42u8; MESSAGE_LENGTH];
         let epoch = 5u32;
-        let signature = XMSSSignature::sign(&sk, epoch, &message)
+        let signature = XMSSSignature::sign(sk, epoch, &message)
             .expect("Signing should succeed");
+
+        // Clone pk for the item
+        let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
+        let pk_clone = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
 
         let item = VerificationItem {
             message,
             epoch,
             signature,
-            public_key: Some(pk),
+            public_key: Some(pk_clone),
         };
 
         // Test serialization
@@ -122,13 +142,12 @@ mod tests {
 
     #[test]
     fn test_aggregation_batch_serde() {
-        let mut rng = rand::rng();
-        let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
+        let (pk, sk) = get_test_keypair();
 
         let item1 = VerificationItem {
             message: [1u8; MESSAGE_LENGTH],
             epoch: 0,
-            signature: XMSSSignature::sign(&sk, 0, &[1u8; MESSAGE_LENGTH])
+            signature: XMSSSignature::sign(sk, 0, &[1u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
             public_key: None,
         };
@@ -136,14 +155,18 @@ mod tests {
         let item2 = VerificationItem {
             message: [2u8; MESSAGE_LENGTH],
             epoch: 1,
-            signature: XMSSSignature::sign(&sk, 1, &[2u8; MESSAGE_LENGTH])
+            signature: XMSSSignature::sign(sk, 1, &[2u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
             public_key: None,
         };
 
+        // Clone pk for the batch
+        let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
+        let pk_clone = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
+
         let batch = AggregationBatch {
             mode: AggregationMode::SingleKey,
-            public_key: Some(pk),
+            public_key: Some(pk_clone),
             items: vec![item1, item2],
         };
 
@@ -190,15 +213,14 @@ mod tests {
 
     #[test]
     fn test_verification_item_creation() {
-        let mut rng = rand::rng();
-        let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
+        let (pk, sk) = get_test_keypair();
 
         let item = VerificationItem {
             message: [0u8; MESSAGE_LENGTH],
             epoch: 0,
-            signature: XMSSSignature::sign(&sk, 0, &[0u8; MESSAGE_LENGTH])
+            signature: XMSSSignature::sign(sk, 0, &[0u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: Some(pk),
+            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
         };
 
         // Verify item was created successfully
@@ -208,20 +230,19 @@ mod tests {
 
     #[test]
     fn test_aggregation_batch_creation() {
-        let mut rng = rand::rng();
-        let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
+        let (pk, sk) = get_test_keypair();
 
         let item = VerificationItem {
             message: [0u8; MESSAGE_LENGTH],
             epoch: 0,
-            signature: XMSSSignature::sign(&sk, 0, &[0u8; MESSAGE_LENGTH])
+            signature: XMSSSignature::sign(sk, 0, &[0u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
             public_key: None,
         };
 
         let batch = AggregationBatch {
             mode: AggregationMode::SingleKey,
-            public_key: Some(pk),
+            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
             items: vec![item],
         };
 

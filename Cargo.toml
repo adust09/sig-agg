@@ -37,6 +37,7 @@ cast_sign_loss = "allow"
 hashsig = { git = "https://github.com/b-wagn/hash-sig" }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
+hex = "0.4"
 
 [dev-dependencies]
 rand = "0.9"

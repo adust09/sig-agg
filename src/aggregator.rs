@@ -7,7 +7,42 @@ use std::collections::HashSet;
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
-/// Validate single-key batch aggregation constraints
+/// Validates single-key batch aggregation constraints.
+///
+/// In SingleKey mode, all signatures must share the same public key but use unique epochs.
+/// This function ensures that the batch contains no duplicate epochs, which would violate
+/// XMSS security requirements.
+///
+/// # Arguments
+///
+/// * `items` - Slice of verification items to validate
+///
+/// # Returns
+///
+/// * `Ok(())` - Validation successful, batch is ready for aggregation
+/// * `Err(AggregationError::EmptyBatch)` - No items provided
+/// * `Err(AggregationError::DuplicateEpoch)` - Multiple items use the same epoch
+///
+/// # Examples
+///
+/// ```no_run
+/// use sig_agg::{validate_single_key, VerificationItem, AggregationError};
+///
+/// let items: Vec<VerificationItem> = vec![/* ... */];
+///
+/// match validate_single_key(&items) {
+///     Ok(()) => println!("Batch is valid for SingleKey aggregation"),
+///     Err(AggregationError::DuplicateEpoch { epoch }) => {
+///         eprintln!("Duplicate epoch {} detected", epoch);
+///     }
+///     Err(e) => eprintln!("Validation failed: {}", e),
+/// }
+/// ```
+///
+/// # Security
+///
+/// SingleKey mode REQUIRES that all signatures use different epochs to prevent
+/// XMSS signature reuse attacks. This function enforces this constraint.
 pub fn validate_single_key(items: &[VerificationItem]) -> Result<(), AggregationError> {
     if items.is_empty() {
         return Err(AggregationError::EmptyBatch);
@@ -27,7 +62,44 @@ pub fn validate_single_key(items: &[VerificationItem]) -> Result<(), Aggregation
     Ok(())
 }
 
-/// Validate multi-key aggregation constraints
+/// Validates multi-key aggregation constraints.
+///
+/// In MultiKey mode, signatures may use different public keys. This function ensures:
+/// 1. All items have their `public_key` field populated
+/// 2. No (public_key, epoch) pair appears more than once
+///
+/// # Arguments
+///
+/// * `items` - Slice of verification items to validate
+///
+/// # Returns
+///
+/// * `Ok(())` - Validation successful, batch is ready for aggregation
+/// * `Err(AggregationError::EmptyBatch)` - No items provided
+/// * `Err(AggregationError::MissingPublicKey)` - An item is missing its public key
+/// * `Err(AggregationError::DuplicateKeyEpochPair)` - Same (key, epoch) pair used twice
+/// * `Err(AggregationError::SerializationError)` - Failed to serialize a public key
+///
+/// # Examples
+///
+/// ```no_run
+/// use sig_agg::{validate_multi_key, VerificationItem, AggregationError};
+///
+/// let items: Vec<VerificationItem> = vec![/* ... with public_key populated */];
+///
+/// match validate_multi_key(&items) {
+///     Ok(()) => println!("Batch is valid for MultiKey aggregation"),
+///     Err(AggregationError::MissingPublicKey { mode }) => {
+///         eprintln!("Item missing public key in {} mode", mode);
+///     }
+///     Err(e) => eprintln!("Validation failed: {}", e),
+/// }
+/// ```
+///
+/// # Security
+///
+/// Each (public_key, epoch) combination must be unique to prevent XMSS signature
+/// reuse within the aggregated batch.
 pub fn validate_multi_key(items: &[VerificationItem]) -> Result<(), AggregationError> {
     if items.is_empty() {
         return Err(AggregationError::EmptyBatch);
@@ -70,18 +142,101 @@ pub fn validate_multi_key(items: &[VerificationItem]) -> Result<(), AggregationE
     Ok(())
 }
 
-/// Aggregate multiple XMSS signatures into a batch structure
+/// Aggregates multiple XMSS signatures into a batch ready for zkVM verification.
+///
+/// This is the main entry point for signature aggregation. It validates the input
+/// according to the specified mode and constructs an `AggregationBatch` that can be
+/// processed by the zkVM guest program for succinct proof generation.
 ///
 /// # Arguments
-/// * `items` - Collection of verification items (message, epoch, signature, public key)
-/// * `mode` - Aggregation mode (SingleKey or MultiKey)
+///
+/// * `items` - Collection of verification items (message, epoch, signature, public key).
+///             For SingleKey mode, `public_key` should be `None` in each item.
+///             For MultiKey mode, `public_key` must be `Some(...)` in each item.
+/// * `mode` - Aggregation mode determining validation rules:
+///            - `AggregationMode::SingleKey`: All signatures share one public key
+///            - `AggregationMode::MultiKey`: Signatures may have different public keys
 ///
 /// # Returns
-/// * `Ok(AggregationBatch)` - Validated batch ready for zkVM processing
-/// * `Err(AggregationError)` - Validation failure with specific error context
 ///
-/// # Complexity
-/// O(N) where N is the number of items (dominated by iteration and hash set operations)
+/// * `Ok(AggregationBatch)` - Validated batch ready for zkVM processing
+/// * `Err(AggregationError)` - Validation failure (see error variants below)
+///
+/// # Errors
+///
+/// This function returns errors for various validation failures:
+/// - `EmptyBatch` - No items provided (at least one signature required)
+/// - `DuplicateEpoch` - (SingleKey mode) Same epoch used multiple times
+/// - `MissingPublicKey` - (MultiKey mode) Item missing required public key
+/// - `DuplicateKeyEpochPair` - (MultiKey mode) Same (key, epoch) pair appears twice
+/// - `SerializationError` - Failed to serialize public key for comparison
+///
+/// # Performance
+///
+/// Time complexity: O(N) where N is the number of items
+/// Space complexity: O(N) for uniqueness tracking via hash sets
+///
+/// # Examples
+///
+/// ## SingleKey Mode
+///
+/// ```no_run
+/// use sig_agg::{aggregate, AggregationMode, VerificationItem};
+///
+/// # let shared_pk = unimplemented!();
+/// // Create verification items (all signatures from same key)
+/// let items: Vec<VerificationItem> = vec![/* ... with public_key = None */];
+///
+/// // Aggregate in SingleKey mode
+/// let mut batch = aggregate(items, AggregationMode::SingleKey)
+///     .expect("Aggregation failed");
+///
+/// // Set the shared public key for the batch
+/// batch.public_key = Some(shared_pk);
+///
+/// // Now batch can be passed to zkVM for proof generation
+/// ```
+///
+/// ## MultiKey Mode
+///
+/// ```no_run
+/// use sig_agg::{aggregate, AggregationMode, VerificationItem};
+///
+/// // Create verification items (each with its own public key)
+/// let items: Vec<VerificationItem> = vec![/* ... with public_key = Some(...) */];
+///
+/// // Aggregate in MultiKey mode
+/// let batch = aggregate(items, AggregationMode::MultiKey)
+///     .expect("Aggregation failed");
+///
+/// // batch.public_key will be None in MultiKey mode
+/// // Now batch can be passed to zkVM for proof generation
+/// ```
+///
+/// ## Error Handling
+///
+/// ```no_run
+/// use sig_agg::{aggregate, AggregationMode, AggregationError};
+/// # let items = vec![];
+///
+/// match aggregate(items, AggregationMode::SingleKey) {
+///     Ok(batch) => println!("Created batch with {} items", batch.items.len()),
+///     Err(AggregationError::EmptyBatch) => {
+///         eprintln!("Cannot aggregate empty batch");
+///     }
+///     Err(AggregationError::DuplicateEpoch { epoch }) => {
+///         eprintln!("Duplicate epoch {} detected", epoch);
+///     }
+///     Err(e) => eprintln!("Aggregation failed: {}", e),
+/// }
+/// ```
+///
+/// # Host vs Guest Usage
+///
+/// This function is intended for **host-side** use only. It prepares batches that
+/// are then serialized and passed to the zkVM guest program for verification.
+/// The guest program receives an `AggregationBatch` and verifies all signatures
+/// within the zkVM environment to generate a succinct proof.
 pub fn aggregate(
     items: Vec<VerificationItem>,
     mode: AggregationMode,

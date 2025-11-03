@@ -1,8 +1,77 @@
-// Comprehensive error handling for aggregation operations
+//! Error types for XMSS signature aggregation operations.
+//!
+//! This module defines comprehensive error handling for the aggregation system,
+//! covering validation failures, cryptographic errors, and zkVM system failures.
+//!
+//! # Error Categories
+//!
+//! ## Validation Errors
+//!
+//! Errors that occur during batch validation before zkVM processing:
+//! - [`EmptyBatch`](AggregationError::EmptyBatch) - No signatures provided
+//! - [`DuplicateEpoch`](AggregationError::DuplicateEpoch) - Same epoch used twice (SingleKey)
+//! - [`DuplicateKeyEpochPair`](AggregationError::DuplicateKeyEpochPair) - Same (key, epoch) pair (MultiKey)
+//! - [`MissingPublicKey`](AggregationError::MissingPublicKey) - Required public key not provided
+//! - [`MismatchedPublicKey`](AggregationError::MismatchedPublicKey) - Public keys don't match
+//! - [`BatchTooLarge`](AggregationError::BatchTooLarge) - Batch exceeds zkVM memory limits
+//!
+//! ## Cryptographic Errors
+//!
+//! Errors related to signature verification:
+//! - [`InvalidSignature`](AggregationError::InvalidSignature) - Signature verification failed
+//! - [`VerificationMismatch`](AggregationError::VerificationMismatch) - Wrong number of valid signatures
+//! - [`InvalidProof`](AggregationError::InvalidProof) - zkVM proof is invalid
+//!
+//! ## System Errors
+//!
+//! Errors from zkVM operations and serialization:
+//! - [`SerializationError`](AggregationError::SerializationError) - Failed to serialize/deserialize
+//! - [`CompilationError`](AggregationError::CompilationError) - zkVM guest compilation failed
+//! - [`ProofGenerationError`](AggregationError::ProofGenerationError) - zkVM proof generation failed
+//! - [`ProofVerificationError`](AggregationError::ProofVerificationError) - zkVM proof verification failed
+//! - [`MemoryExhausted`](AggregationError::MemoryExhausted) - Out of memory during zkVM execution
+//!
+//! # Examples
+//!
+//! ## Handling Validation Errors
+//!
+//! ```no_run
+//! use sig_agg::{aggregate, AggregationMode, AggregationError};
+//! # let items = vec![];
+//!
+//! match aggregate(items, AggregationMode::SingleKey) {
+//!     Ok(batch) => println!("Batch created successfully"),
+//!     Err(AggregationError::EmptyBatch) => {
+//!         eprintln!("Error: At least one signature required");
+//!     }
+//!     Err(AggregationError::DuplicateEpoch { epoch }) => {
+//!         eprintln!("Error: Epoch {} used multiple times", epoch);
+//!     }
+//!     Err(e) => eprintln!("Aggregation failed: {}", e),
+//! }
+//! ```
+//!
+//! ## Error Display
+//!
+//! All errors implement `Display` and `Error` traits for integration with
+//! Rust error handling:
+//!
+//! ```
+//! use sig_agg::AggregationError;
+//!
+//! let error = AggregationError::EmptyBatch;
+//! println!("{}", error);  // "Empty batch: at least one signature required"
+//! ```
 
 use std::fmt;
 
-/// Aggregation error types
+/// Comprehensive error type for aggregation operations.
+///
+/// All aggregation functions return `Result<T, AggregationError>` to provide
+/// detailed error information with context. Each variant includes relevant data
+/// to help diagnose and handle the error.
+///
+/// See the [module documentation](self) for error categories and examples.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AggregationError {
     // Validation errors

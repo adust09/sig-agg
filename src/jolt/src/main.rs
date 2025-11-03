@@ -12,10 +12,10 @@ use rayon::{iter::IntoParallelIterator, prelude::*};
 const NUM_SIGNATURES: usize = 1000;
 
 // Use the guest types directly to avoid duplication
-use guest::{VerificationBatch, VerificationItem};
+use guest::{AggregationBatch, AggregationMode, VerificationItem};
 
 /// Generates or loads cached public key and 1000 signatures to be verified.
-fn setup_benchmark_data() -> VerificationBatch {
+fn setup_benchmark_data() -> AggregationBatch {
     let cache_dir = "./tmp";
     let cache_file = "./tmp/benchmark_data.bin";
 
@@ -25,7 +25,7 @@ fn setup_benchmark_data() -> VerificationBatch {
         let start = Instant::now();
 
         match fs::read(cache_file) {
-            Ok(cached_data) => match bincode::deserialize::<VerificationBatch>(&cached_data) {
+            Ok(cached_data) => match bincode::deserialize::<AggregationBatch>(&cached_data) {
                 Ok(data) => {
                     println!("Benchmark data loaded from cache in {:?}", start.elapsed());
                     return data;
@@ -51,6 +51,7 @@ fn setup_benchmark_data() -> VerificationBatch {
     let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, NUM_SIGNATURES);
 
     // Generate 1000 signatures in parallel for speed.
+    // For SingleKey mode, items don't include individual public keys
     let items: Vec<VerificationItem> = (0..NUM_SIGNATURES)
         .into_par_iter()
         .map(|i| {
@@ -69,12 +70,14 @@ fn setup_benchmark_data() -> VerificationBatch {
                 message,
                 epoch,
                 signature,
+                public_key: None, // SingleKey mode: shared public key in batch
             }
         })
         .collect();
 
-    let verification_batch = VerificationBatch {
-        public_key: pk,
+    let aggregation_batch = AggregationBatch {
+        mode: AggregationMode::SingleKey,
+        public_key: Some(pk), // Shared public key for all signatures
         items,
     };
 
@@ -82,7 +85,7 @@ fn setup_benchmark_data() -> VerificationBatch {
     if let Err(e) = fs::create_dir_all(cache_dir) {
         println!("Failed to create cache directory: {}", e);
     } else {
-        match bincode::serialize(&verification_batch) {
+        match bincode::serialize(&aggregation_batch) {
             Ok(serialized_data) => {
                 if let Err(e) = fs::write(cache_file, &serialized_data) {
                     println!("Failed to write cache file: {}", e);
@@ -97,12 +100,13 @@ fn setup_benchmark_data() -> VerificationBatch {
     }
 
     println!("Benchmark data generated in {:?}", start.elapsed());
-    verification_batch
+    aggregation_batch
 }
 
 pub fn main() {
-    println!("XMSS 1K Signature Verification Benchmark - Jolt zkVM");
-    println!("========================================================");
+    println!("XMSS Signature Aggregation Benchmark - Jolt zkVM");
+    println!("===================================================");
+    println!("Mode: SingleKey aggregation ({} signatures)", NUM_SIGNATURES);
     println!();
 
     // 1. Setup Phase: Generate keys and signatures.
@@ -112,36 +116,36 @@ pub fn main() {
     println!("Compiling and preprocessing guest program...");
     let start_preprocess = Instant::now();
     let target_dir = "/tmp/jolt-guest-targets";
-    let mut program = guest::compile_verify_signatures(target_dir);
+    let mut program = guest::compile_verify_aggregation(target_dir);
 
-    let prover_preprocessing = guest::preprocess_prover_verify_signatures(&mut program);
+    let prover_preprocessing = guest::preprocess_prover_verify_aggregation(&mut program);
     let verifier_preprocessing =
-        guest::verifier_preprocessing_from_prover_verify_signatures(&prover_preprocessing);
+        guest::verifier_preprocessing_from_prover_verify_aggregation(&prover_preprocessing);
     println!("Jolt preprocessed in {:?}", start_preprocess.elapsed());
 
-    let prove_verify_signatures =
-        guest::build_prover_verify_signatures(program, prover_preprocessing);
-    let verify_verify_signatures = guest::build_verifier_verify_signatures(verifier_preprocessing);
+    let prove_verify_aggregation =
+        guest::build_prover_verify_aggregation(program, prover_preprocessing);
+    let verify_verify_aggregation = guest::build_verifier_verify_aggregation(verifier_preprocessing);
 
     // 3. Proving Phase
     println!(
-        "Starting zkVM proof generation for {} signatures...",
+        "Starting zkVM proof generation for {} aggregated signatures...",
         NUM_SIGNATURES
     );
     let start_prove = Instant::now();
-    let (verified_count, proof, program_io) = prove_verify_signatures(verification_data);
+    let (verified_count, proof, program_io) = prove_verify_aggregation(verification_data);
     let prove_time = start_prove.elapsed();
     println!("zkVM proof generated in {:?}", prove_time);
     println!(
-        "Guest program confirmed {} valid signatures",
+        "Guest program verified {} signatures in aggregate",
         verified_count
     );
 
     // 4. Verification Phase
-    println!("Verifying zkVM proof...");
+    println!("Verifying zkVM aggregation proof...");
     let start_verify = Instant::now();
     let verification_data_for_verify = setup_benchmark_data();
-    let is_valid = verify_verify_signatures(
+    let is_valid = verify_verify_aggregation(
         verification_data_for_verify,
         verified_count,
         program_io.panic,
@@ -149,7 +153,7 @@ pub fn main() {
     );
     let verify_time = start_verify.elapsed();
     println!(
-        "Proof is valid: {}! Verified in {:?}",
+        "Aggregation proof is valid: {}! Verified in {:?}",
         is_valid, verify_time
     );
 

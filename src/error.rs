@@ -9,10 +9,7 @@
 //!
 //! Errors that occur during batch validation before zkVM processing:
 //! - [`EmptyBatch`](AggregationError::EmptyBatch) - No signatures provided
-//! - [`DuplicateEpoch`](AggregationError::DuplicateEpoch) - Same epoch used twice (SingleKey)
-//! - [`DuplicateKeyEpochPair`](AggregationError::DuplicateKeyEpochPair) - Same (key, epoch) pair (MultiKey)
-//! - [`MissingPublicKey`](AggregationError::MissingPublicKey) - Required public key not provided
-//! - [`MismatchedPublicKey`](AggregationError::MismatchedPublicKey) - Public keys don't match
+//! - [`DuplicateKeyEpochPair`](AggregationError::DuplicateKeyEpochPair) - Same (key, epoch) pair
 //! - [`BatchTooLarge`](AggregationError::BatchTooLarge) - Batch exceeds zkVM memory limits
 //!
 //! ## Cryptographic Errors
@@ -36,16 +33,16 @@
 //! ## Handling Validation Errors
 //!
 //! ```no_run
-//! use sig_agg::{aggregate, AggregationMode, AggregationError};
+//! use sig_agg::{aggregate, AggregationError};
 //! # let items = vec![];
 //!
-//! match aggregate(items, AggregationMode::SingleKey) {
+//! match aggregate(items) {
 //!     Ok(batch) => println!("Batch created successfully"),
 //!     Err(AggregationError::EmptyBatch) => {
 //!         eprintln!("Error: At least one signature required");
 //!     }
-//!     Err(AggregationError::DuplicateEpoch { epoch }) => {
-//!         eprintln!("Error: Epoch {} used multiple times", epoch);
+//!     Err(AggregationError::DuplicateKeyEpochPair { epoch, .. }) => {
+//!         eprintln!("Error: Duplicate (key, epoch) pair with epoch {}", epoch);
 //!     }
 //!     Err(e) => eprintln!("Aggregation failed: {}", e),
 //! }
@@ -77,14 +74,8 @@ pub enum AggregationError {
     // Validation errors
     /// Empty batch provided
     EmptyBatch,
-    /// Duplicate epoch in SingleKey mode
-    DuplicateEpoch { epoch: u32 },
-    /// Mismatched public keys in SingleKey mode
-    MismatchedPublicKey { expected: String, found: String },
-    /// Duplicate (public_key, epoch) pair in MultiKey mode
+    /// Duplicate (public_key, epoch) pair
     DuplicateKeyEpochPair { public_key: String, epoch: u32 },
-    /// Missing public key field when required
-    MissingPublicKey { mode: String },
     /// Batch size exceeds zkVM memory limits
     BatchTooLarge { size: usize, max: usize },
 
@@ -113,25 +104,12 @@ impl fmt::Display for AggregationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyBatch => write!(f, "Empty batch: at least one signature required"),
-            Self::DuplicateEpoch { epoch } => {
-                write!(f, "Duplicate epoch {} in SingleKey aggregation mode", epoch)
-            }
-            Self::MismatchedPublicKey { expected, found } => {
-                write!(
-                    f,
-                    "Mismatched public key: expected {}, found {}",
-                    expected, found
-                )
-            }
             Self::DuplicateKeyEpochPair { public_key, epoch } => {
                 write!(
                     f,
-                    "Duplicate (public_key, epoch) pair: ({}, {}) in MultiKey mode",
+                    "Duplicate (public_key, epoch) pair: ({}, {})",
                     public_key, epoch
                 )
-            }
-            Self::MissingPublicKey { mode } => {
-                write!(f, "Missing public key in {} mode", mode)
             }
             Self::BatchTooLarge { size, max } => {
                 write!(
@@ -190,27 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_epoch_error() {
-        let error = AggregationError::DuplicateEpoch { epoch: 42 };
-        assert_eq!(
-            error.to_string(),
-            "Duplicate epoch 42 in SingleKey aggregation mode"
-        );
-    }
-
-    #[test]
-    fn test_mismatched_public_key_error() {
-        let error = AggregationError::MismatchedPublicKey {
-            expected: "pk1".to_string(),
-            found: "pk2".to_string(),
-        };
-        assert_eq!(
-            error.to_string(),
-            "Mismatched public key: expected pk1, found pk2"
-        );
-    }
-
-    #[test]
     fn test_duplicate_key_epoch_pair_error() {
         let error = AggregationError::DuplicateKeyEpochPair {
             public_key: "pk1".to_string(),
@@ -218,16 +175,8 @@ mod tests {
         };
         assert_eq!(
             error.to_string(),
-            "Duplicate (public_key, epoch) pair: (pk1, 5) in MultiKey mode"
+            "Duplicate (public_key, epoch) pair: (pk1, 5)"
         );
-    }
-
-    #[test]
-    fn test_missing_public_key_error() {
-        let error = AggregationError::MissingPublicKey {
-            mode: "MultiKey".to_string(),
-        };
-        assert_eq!(error.to_string(), "Missing public key in MultiKey mode");
     }
 
     #[test]
@@ -325,8 +274,14 @@ mod tests {
         let error2 = AggregationError::EmptyBatch;
         assert_eq!(error1, error2);
 
-        let error3 = AggregationError::DuplicateEpoch { epoch: 5 };
-        let error4 = AggregationError::DuplicateEpoch { epoch: 5 };
+        let error3 = AggregationError::DuplicateKeyEpochPair {
+            public_key: "pk1".to_string(),
+            epoch: 5,
+        };
+        let error4 = AggregationError::DuplicateKeyEpochPair {
+            public_key: "pk1".to_string(),
+            epoch: 5,
+        };
         assert_eq!(error3, error4);
     }
 
@@ -353,9 +308,12 @@ mod tests {
     #[test]
     fn test_error_context_data() {
         // Test that errors include relevant context data
-        let error = AggregationError::DuplicateEpoch { epoch: 123 };
+        let error = AggregationError::DuplicateKeyEpochPair {
+            public_key: "pk1".to_string(),
+            epoch: 123,
+        };
         match error {
-            AggregationError::DuplicateEpoch { epoch } => assert_eq!(epoch, 123),
+            AggregationError::DuplicateKeyEpochPair { epoch, .. } => assert_eq!(epoch, 123),
             _ => panic!("Wrong error variant"),
         }
 

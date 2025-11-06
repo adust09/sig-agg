@@ -6,21 +6,24 @@
 //! # Overview
 //!
 //! The `sig-agg` library enables efficient batch verification of post-quantum XMSS signatures
-//! through zero-knowledge proofs. It supports two aggregation modes:
+//! through zero-knowledge proofs. Signatures from different signers can be aggregated into
+//! a single batch for efficient verification.
 //!
-//! - **SingleKey**: All signatures share the same public key (different epochs)
-//! - **MultiKey**: Signatures from different public keys
+//! # Validation Rules
+//!
+//! Each (public_key, epoch) combination must be unique within a batch to prevent XMSS signature
+//! reuse attacks.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use sig_agg::{aggregate, AggregationMode, VerificationItem};
+//! use sig_agg::{aggregate, VerificationItem};
 //!
 //! // Create verification items (signatures with their context)
 //! let items: Vec<VerificationItem> = vec![/* ... */];
 //!
-//! // Aggregate signatures in SingleKey mode
-//! let batch = aggregate(items, AggregationMode::SingleKey)
+//! // Aggregate signatures
+//! let batch = aggregate(items)
 //!     .expect("Aggregation failed");
 //!
 //! // The batch can now be verified in a zkVM environment
@@ -39,8 +42,6 @@ pub mod error;
 pub mod types;
 
 // Re-export commonly used types and functions for convenience
-pub use aggregator::{aggregate, validate_multi_key, validate_single_key};
+pub use aggregator::{aggregate, validate};
 pub use error::AggregationError;
-pub use types::{
-    AggregationBatch, AggregationMode, AggregationProof, ProofMetadata, VerificationItem,
-};
+pub use types::{AggregationBatch, AggregationProof, ProofMetadata, VerificationItem};

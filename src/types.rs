@@ -12,105 +12,29 @@ use serde::{Deserialize, Serialize};
 // Type alias for the XMSS signature scheme we're using
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
-/// Aggregation mode determining validation and verification logic.
-///
-/// This enum specifies how signatures should be validated and verified within
-/// a batch. The mode affects both validation rules and zkVM verification logic.
-///
-/// # Variants
-///
-/// ## `SingleKey`
-///
-/// All signatures in the batch share the same XMSS public key. Each signature
-/// must use a unique epoch to prevent signature reuse attacks.
-///
-/// **Use when:**
-/// - Aggregating signatures from a single entity/keypair
-/// - All signatures belong to the same XMSS tree
-/// - Optimizing for minimal proof size (shared public key stored once)
-///
-/// **Validation rules:**
-/// - Each epoch must be unique within the batch
-/// - Items should have `public_key = None` (shared key stored in batch)
-///
-/// ## `MultiKey`
-///
-/// Signatures may come from different XMSS public keys. Each (public_key, epoch)
-/// pair must be unique within the batch.
-///
-/// **Use when:**
-/// - Aggregating signatures from multiple entities
-/// - Combining signatures from different XMSS trees
-/// - Flexible batch composition
-///
-/// **Validation rules:**
-/// - Each (public_key, epoch) combination must be unique
-/// - All items must have `public_key = Some(...)`
-///
-/// # Examples
-///
-/// ```
-/// use sig_agg::AggregationMode;
-///
-/// # let single_signer = true;
-/// // Choose mode based on your use case
-/// let mode = if single_signer {
-///     AggregationMode::SingleKey
-/// } else {
-///     AggregationMode::MultiKey
-/// };
-/// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AggregationMode {
-    /// All signatures share the same public key (unique epochs required)
-    SingleKey,
-    /// Signatures may have different public keys (unique key-epoch pairs required)
-    MultiKey,
-}
-
 /// Represents a single XMSS signature with its verification context.
 ///
 /// A `VerificationItem` contains all the information needed to verify one XMSS
-/// signature: the message, the epoch (one-time signature index), the signature
-/// itself, and optionally the public key.
+/// signature: the message, the epoch (one-time signature index), the signature,
+/// and the public key.
 ///
 /// # Fields
 ///
 /// * `message` - The message that was signed (fixed-length array)
 /// * `epoch` - The XMSS epoch/index used for this signature (must be unique per key)
 /// * `signature` - The XMSS signature data
-/// * `public_key` - Optional public key:
-///   - `None` for SingleKey mode (shared key stored in batch)
-///   - `Some(pk)` for MultiKey mode (each item has its own key)
+/// * `public_key` - The public key used to create this signature
+///
+/// # Validation Rules
+///
+/// Each (public_key, epoch) combination must be unique within a batch to prevent
+/// XMSS signature reuse attacks.
 ///
 /// # Examples
-///
-/// ## Creating a VerificationItem for SingleKey Mode
 ///
 /// ```no_run
 /// use sig_agg::VerificationItem;
 /// use hashsig::{MESSAGE_LENGTH, signature::SignatureScheme};
-/// # use hashsig::signature::generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1 as XMSSSignature;
-///
-/// # let sk = unimplemented!();
-/// # let message = [0u8; MESSAGE_LENGTH];
-/// # let epoch = 0u32;
-/// let signature = XMSSSignature::sign(&sk, epoch, &message)
-///     .expect("Signing failed");
-///
-/// let item = VerificationItem {
-///     message,
-///     epoch,
-///     signature,
-///     public_key: None,  // SingleKey mode
-/// };
-/// ```
-///
-/// ## Creating a VerificationItem for MultiKey Mode
-///
-/// ```no_run
-/// use sig_agg::VerificationItem;
-/// # use hashsig::{MESSAGE_LENGTH, signature::SignatureScheme};
 /// # use hashsig::signature::generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1 as XMSSSignature;
 ///
 /// # let sk = unimplemented!();
@@ -124,7 +48,7 @@ pub enum AggregationMode {
 ///     message,
 ///     epoch,
 ///     signature,
-///     public_key: Some(pk),  // MultiKey mode requires public key
+///     public_key: pk,
 /// };
 /// ```
 ///
@@ -140,8 +64,8 @@ pub struct VerificationItem {
     pub epoch: u32,
     /// XMSS signature data
     pub signature: <XMSSSignature as SignatureScheme>::Signature,
-    /// Public key (None for SingleKey mode, Some for MultiKey mode)
-    pub public_key: Option<<XMSSSignature as SignatureScheme>::PublicKey>,
+    /// Public key used to create this signature
+    pub public_key: <XMSSSignature as SignatureScheme>::PublicKey,
 }
 
 /// Batch of signatures ready for zkVM verification.
@@ -151,8 +75,6 @@ pub struct VerificationItem {
 ///
 /// # Fields
 ///
-/// * `mode` - Aggregation mode (SingleKey or MultiKey)
-/// * `public_key` - Shared public key for SingleKey mode, `None` for MultiKey mode
 /// * `items` - Vector of verification items to be verified
 ///
 /// # Usage
@@ -161,33 +83,19 @@ pub struct VerificationItem {
 /// validation. The batch is then serialized and passed to the zkVM guest program
 /// for proof generation.
 ///
+/// # Validation Rules
+///
+/// Each (public_key, epoch) combination must be unique within the batch to prevent
+/// XMSS signature reuse attacks.
+///
 /// # Examples
 ///
-/// ## Creating a SingleKey Batch
-///
 /// ```no_run
-/// use sig_agg::{aggregate, AggregationMode, VerificationItem};
+/// use sig_agg::{aggregate, VerificationItem};
 ///
 /// # let items: Vec<VerificationItem> = vec![];
-/// # let shared_pk = unimplemented!();
-/// let mut batch = aggregate(items, AggregationMode::SingleKey)
+/// let batch = aggregate(items)
 ///     .expect("Aggregation failed");
-///
-/// // Set shared public key for SingleKey mode
-/// batch.public_key = Some(shared_pk);
-/// ```
-///
-/// ## Creating a MultiKey Batch
-///
-/// ```no_run
-/// use sig_agg::{aggregate, AggregationMode, VerificationItem};
-///
-/// # let items: Vec<VerificationItem> = vec![];
-/// let batch = aggregate(items, AggregationMode::MultiKey)
-///     .expect("Aggregation failed");
-///
-/// // batch.public_key will be None (keys stored in each item)
-/// assert!(batch.public_key.is_none());
 /// ```
 ///
 /// # Host vs Guest
@@ -196,10 +104,6 @@ pub struct VerificationItem {
 /// - **Guest side**: Batches are deserialized and verified within zkVM
 #[derive(Serialize, Deserialize)]
 pub struct AggregationBatch {
-    /// Aggregation mode determining verification logic
-    pub mode: AggregationMode,
-    /// Shared public key (Some for SingleKey mode, None for MultiKey mode)
-    pub public_key: Option<<XMSSSignature as SignatureScheme>::PublicKey>,
     /// Collection of verification items to verify
     pub items: Vec<VerificationItem>,
 }
@@ -221,14 +125,7 @@ impl std::fmt::Debug for VerificationItem {
                 ),
             )
             .field("signature", &"<XMSS Signature>")
-            .field(
-                "public_key",
-                &if self.public_key.is_some() {
-                    "Some(<XMSS PublicKey>)"
-                } else {
-                    "None"
-                },
-            )
+            .field("public_key", &"<XMSS PublicKey>")
             .finish()
     }
 }
@@ -236,15 +133,6 @@ impl std::fmt::Debug for VerificationItem {
 impl std::fmt::Debug for AggregationBatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggregationBatch")
-            .field("mode", &self.mode)
-            .field(
-                "public_key",
-                &if self.public_key.is_some() {
-                    "Some(<XMSS PublicKey>)"
-                } else {
-                    "None"
-                },
-            )
             .field("items", &format_args!("[{} items]", self.items.len()))
             .finish()
     }
@@ -320,14 +208,13 @@ pub struct ProofMetadata {
 /// # Examples
 ///
 /// ```no_run
-/// use sig_agg::{AggregationProof, AggregationMode, ProofMetadata};
+/// use sig_agg::{AggregationProof, ProofMetadata};
 ///
 /// # let proof_bytes = vec![];
 /// // After zkVM proof generation
 /// let proof = AggregationProof {
 ///     proof: proof_bytes,
 ///     verified_count: 1000,
-///     mode: AggregationMode::SingleKey,
 ///     metadata: ProofMetadata {
 ///         timestamp: 1234567890,
 ///         batch_size: 1000,
@@ -345,8 +232,6 @@ pub struct AggregationProof {
     pub proof: Vec<u8>,
     /// Number of signatures verified in this proof
     pub verified_count: u32,
-    /// Aggregation mode used during verification
-    pub mode: AggregationMode,
     /// Proof generation metadata
     pub metadata: ProofMetadata,
 }
@@ -374,20 +259,6 @@ mod tests {
     }
 
     #[test]
-    fn test_aggregation_mode_equality() {
-        assert_eq!(AggregationMode::SingleKey, AggregationMode::SingleKey);
-        assert_eq!(AggregationMode::MultiKey, AggregationMode::MultiKey);
-        assert_ne!(AggregationMode::SingleKey, AggregationMode::MultiKey);
-    }
-
-    #[test]
-    fn test_aggregation_mode_copy() {
-        let mode = AggregationMode::SingleKey;
-        let mode_copy = mode;
-        assert_eq!(mode, mode_copy);
-    }
-
-    #[test]
     fn test_verification_item_serde() {
         // Use shared test keypair
         let (pk, sk) = get_test_keypair();
@@ -404,7 +275,7 @@ mod tests {
             message,
             epoch,
             signature,
-            public_key: Some(pk_clone),
+            public_key: pk_clone,
         };
 
         // Test serialization
@@ -417,19 +288,23 @@ mod tests {
         // Verify fields match
         assert_eq!(deserialized.message, item.message);
         assert_eq!(deserialized.epoch, item.epoch);
-        assert!(deserialized.public_key.is_some());
     }
 
     #[test]
     fn test_aggregation_batch_serde() {
         let (pk, sk) = get_test_keypair();
 
+        // Clone pk for the items
+        let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
+        let pk_clone1 = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
+        let pk_clone2 = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
+
         let item1 = VerificationItem {
             message: [1u8; MESSAGE_LENGTH],
             epoch: 0,
             signature: XMSSSignature::sign(sk, 0, &[1u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: None,
+            public_key: pk_clone1,
         };
 
         let item2 = VerificationItem {
@@ -437,16 +312,10 @@ mod tests {
             epoch: 1,
             signature: XMSSSignature::sign(sk, 1, &[2u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: None,
+            public_key: pk_clone2,
         };
 
-        // Clone pk for the batch
-        let pk_bytes = bincode::serialize(pk).expect("Serialization should succeed");
-        let pk_clone = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
-
         let batch = AggregationBatch {
-            mode: AggregationMode::SingleKey,
-            public_key: Some(pk_clone),
             items: vec![item1, item2],
         };
 
@@ -457,8 +326,6 @@ mod tests {
         let deserialized: AggregationBatch =
             bincode::deserialize(&serialized).expect("Deserialization should succeed");
 
-        assert_eq!(deserialized.mode, AggregationMode::SingleKey);
-        assert!(deserialized.public_key.is_some());
         assert_eq!(deserialized.items.len(), 2);
     }
 
@@ -474,7 +341,6 @@ mod tests {
         let proof = AggregationProof {
             proof: vec![1, 2, 3, 4, 5],
             verified_count: 100,
-            mode: AggregationMode::MultiKey,
             metadata,
         };
 
@@ -487,7 +353,6 @@ mod tests {
 
         assert_eq!(deserialized.proof, proof.proof);
         assert_eq!(deserialized.verified_count, 100);
-        assert_eq!(deserialized.mode, AggregationMode::MultiKey);
         assert_eq!(deserialized.metadata.batch_size, 100);
     }
 
@@ -495,38 +360,38 @@ mod tests {
     fn test_verification_item_creation() {
         let (pk, sk) = get_test_keypair();
 
+        let pk_clone = bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap();
+
         let item = VerificationItem {
             message: [0u8; MESSAGE_LENGTH],
             epoch: 0,
             signature: XMSSSignature::sign(sk, 0, &[0u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
+            public_key: pk_clone,
         };
 
         // Verify item was created successfully
         assert_eq!(item.epoch, 0);
-        assert!(item.public_key.is_some());
     }
 
     #[test]
     fn test_aggregation_batch_creation() {
         let (pk, sk) = get_test_keypair();
 
+        let pk_clone = bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap();
+
         let item = VerificationItem {
             message: [0u8; MESSAGE_LENGTH],
             epoch: 0,
             signature: XMSSSignature::sign(sk, 0, &[0u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: None,
+            public_key: pk_clone,
         };
 
         let batch = AggregationBatch {
-            mode: AggregationMode::SingleKey,
-            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
             items: vec![item],
         };
 
-        assert_eq!(batch.mode, AggregationMode::SingleKey);
         assert_eq!(batch.items.len(), 1);
     }
 
@@ -534,45 +399,42 @@ mod tests {
     fn test_verification_item_debug() {
         let (pk, sk) = get_test_keypair();
 
+        let pk_clone = bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap();
+
         let item = VerificationItem {
             message: [0x42u8; MESSAGE_LENGTH],
             epoch: 5,
             signature: XMSSSignature::sign(sk, 5, &[0x42u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
+            public_key: pk_clone,
         };
 
         let debug_output = format!("{:?}", item);
         assert!(debug_output.contains("VerificationItem"));
         assert!(debug_output.contains("epoch: 5"));
         assert!(debug_output.contains("[42 42 42 42...]"));
-        assert!(debug_output.contains("Some(<XMSS PublicKey>)"));
+        assert!(debug_output.contains("<XMSS PublicKey>"));
     }
 
     #[test]
     fn test_aggregation_batch_debug() {
         let (pk, sk) = get_test_keypair();
 
+        let pk_bytes = bincode::serialize(pk).unwrap();
         let items: Vec<VerificationItem> = (0..3)
             .map(|i| VerificationItem {
                 message: [i as u8; MESSAGE_LENGTH],
                 epoch: i,
                 signature: XMSSSignature::sign(sk, i, &[i as u8; MESSAGE_LENGTH])
                     .expect("Signing should succeed"),
-                public_key: None,
+                public_key: bincode::deserialize(&pk_bytes).unwrap(),
             })
             .collect();
 
-        let batch = AggregationBatch {
-            mode: AggregationMode::SingleKey,
-            public_key: Some(bincode::deserialize(&bincode::serialize(pk).unwrap()).unwrap()),
-            items,
-        };
+        let batch = AggregationBatch { items };
 
         let debug_output = format!("{:?}", batch);
         assert!(debug_output.contains("AggregationBatch"));
-        assert!(debug_output.contains("SingleKey"));
-        assert!(debug_output.contains("Some(<XMSS PublicKey>)"));
         assert!(debug_output.contains("[3 items]"));
     }
 }

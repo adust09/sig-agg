@@ -1,7 +1,7 @@
 //! Key aggregation example
 //!
 //! This example demonstrates how to aggregate multiple XMSS signatures
-//! from a single public key using the sig-agg library.
+//! using the sig-agg library.
 //!
 //! Run with: `cargo run --example key_aggregation`
 
@@ -12,7 +12,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{AggregationMode, VerificationItem, aggregate};
+use sig_agg::{VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -47,32 +47,31 @@ fn main() {
 
         println!("   ✓ Signed message {} at epoch {}", i, epoch);
 
-        // Create verification item (no public_key for SingleKey mode)
+        // Clone public key for this item
+        let pk_bytes = bincode::serialize(&public_key).expect("Serialization should succeed");
+        let pk_clone = bincode::deserialize(&pk_bytes).expect("Deserialization should succeed");
+
+        // Create verification item with public key
         items.push(VerificationItem {
             message,
             epoch,
             signature,
-            public_key: None, // SingleKey mode: shared key stored in batch
+            public_key: pk_clone,
         });
     }
     println!();
 
     // Step 3: Aggregate signatures into a batch
     println!("3. Aggregating signatures...");
-    let mut batch =
-        aggregate(items, AggregationMode::SingleKey).expect("Aggregation should succeed");
-
-    // Set the shared public key for the batch
-    batch.public_key = Some(public_key);
+    let batch = aggregate(items).expect("Aggregation should succeed");
 
     println!("   ✓ Created batch with {} signatures", batch.items.len());
-    println!("   ✓ Mode: {:?}", batch.mode);
-    println!("   ✓ Shared public key: Present\n");
+    println!("   ✓ Batch is ready for zkVM verification\n");
 
     // Step 4: Verify batch properties
     println!("4. Batch verification properties:");
-    println!("   - All signatures use the same public key");
-    println!("   - Each signature uses a unique epoch (0-4)");
+    println!("   - Each signature includes its public key");
+    println!("   - Each (public_key, epoch) pair is unique");
     println!("   - Batch is ready for zkVM verification\n");
 
     // Step 5: Serialization (for zkVM input)

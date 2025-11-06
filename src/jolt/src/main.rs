@@ -1,20 +1,20 @@
 use std::{fs, path::Path, time::Instant};
 
 use hashsig::{
-    MESSAGE_LENGTH,
     signature::{
-        SignatureScheme,
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
+        SignatureScheme,
     },
+    MESSAGE_LENGTH,
 };
 use rayon::{iter::IntoParallelIterator, prelude::*};
 
-const NUM_SIGNATURES: usize = 1000;
+const NUM_SIGNATURES: usize = 100;
 
 // Use the guest types directly to avoid duplication
 use guest::{AggregationBatch, VerificationItem};
 
-/// Generates or loads cached public key and 1000 signatures to be verified.
+/// Generates or loads cached public key and 100 signatures to be verified.
 fn setup_benchmark_data() -> AggregationBatch {
     let cache_dir = "./tmp";
     let cache_file = "./tmp/benchmark_data.bin";
@@ -58,7 +58,6 @@ fn setup_benchmark_data() -> AggregationBatch {
     let items: Vec<VerificationItem> = (0..NUM_SIGNATURES)
         .into_par_iter()
         .map(|i| {
-            let mut thread_rng = rand::rng();
             let epoch = i as u32;
             let message: [u8; MESSAGE_LENGTH] = (0..MESSAGE_LENGTH)
                 .map(|b| (i + b) as u8)
@@ -66,11 +65,12 @@ fn setup_benchmark_data() -> AggregationBatch {
                 .try_into()
                 .unwrap();
 
-            let signature = SIGWinternitzLifetime18W1::sign(&mut thread_rng, &sk, epoch, &message)
-                .expect("Signing failed");
+            let signature =
+                SIGWinternitzLifetime18W1::sign(&sk, epoch, &message).expect("Signing failed");
 
             // Clone public key via serialization for this item
-            let pk_clone = bincode::deserialize(&pk_bytes).expect("Failed to deserialize public key");
+            let pk_clone =
+                bincode::deserialize(&pk_bytes).expect("Failed to deserialize public key");
 
             VerificationItem {
                 message,
@@ -122,8 +122,14 @@ pub fn main() {
     // 1. Setup Phase: Generate keys and signatures.
     println!("Phase 1: Setup - Generating or Loading Benchmark Data");
     println!("------------------------------------------------------");
-    println!("This phase creates {} XMSS signatures or loads them from cache.", NUM_SIGNATURES);
-    println!("Each signature is created with a unique epoch (0-{}).", NUM_SIGNATURES - 1);
+    println!(
+        "This phase creates {} XMSS signatures or loads them from cache.",
+        NUM_SIGNATURES
+    );
+    println!(
+        "Each signature is created with a unique epoch (0-{}).",
+        NUM_SIGNATURES - 1
+    );
     let verification_data = setup_benchmark_data();
     println!();
 
@@ -141,17 +147,24 @@ pub fn main() {
     let prover_preprocessing = guest::preprocess_prover_verify_aggregation(&mut program);
     let verifier_preprocessing =
         guest::verifier_preprocessing_from_prover_verify_aggregation(&prover_preprocessing);
-    println!("✓ zkVM preprocessing complete in {:?}", start_preprocess.elapsed());
+    println!(
+        "✓ zkVM preprocessing complete in {:?}",
+        start_preprocess.elapsed()
+    );
 
     let prove_verify_aggregation =
         guest::build_prover_verify_aggregation(program, prover_preprocessing);
-    let verify_verify_aggregation = guest::build_verifier_verify_aggregation(verifier_preprocessing);
+    let verify_verify_aggregation =
+        guest::build_verifier_verify_aggregation(verifier_preprocessing);
     println!();
 
     // 3. Proving Phase
     println!("Phase 3: Proof Generation (Aggregated Verification)");
     println!("----------------------------------------------------");
-    println!("Executing guest program inside zkVM to verify all {} signatures...", NUM_SIGNATURES);
+    println!(
+        "Executing guest program inside zkVM to verify all {} signatures...",
+        NUM_SIGNATURES
+    );
     println!("The guest program:");
     println!("  1. Receives the aggregation batch as input");
     println!("  2. Verifies each XMSS signature individually");
@@ -164,7 +177,10 @@ pub fn main() {
     let prove_time = start_prove.elapsed();
     println!();
     println!("✓ zkVM proof generated in {:?}", prove_time);
-    println!("✓ Guest program verified {} signatures successfully", verified_count);
+    println!(
+        "✓ Guest program verified {} signatures successfully",
+        verified_count
+    );
     println!(
         "✓ Proving throughput: {:.2} signatures/second",
         NUM_SIGNATURES as f64 / prove_time.as_secs_f64()
@@ -190,12 +206,24 @@ pub fn main() {
     println!("✓ Size analysis complete");
     println!();
     println!("Size Metrics:");
-    println!("  • Aggregated proof (est): ~{:.0} KB ({:.2} MB)", proof_size_kb_estimate, proof_size_mb);
+    println!(
+        "  • Aggregated proof (est): ~{:.0} KB ({:.2} MB)",
+        proof_size_kb_estimate, proof_size_mb
+    );
     println!("  • Individual signatures:  ~{} KB", individual_sig_size_kb);
-    println!("  • Space saved:            {:.0} KB ({:.1}%)", space_saved_kb, space_saved_percent);
-    println!("  • Compression ratio:      {:.2}x", individual_sig_size_kb as f64 / proof_size_kb_estimate);
+    println!(
+        "  • Space saved:            {:.0} KB ({:.1}%)",
+        space_saved_kb, space_saved_percent
+    );
+    println!(
+        "  • Compression ratio:      {:.2}x",
+        individual_sig_size_kb as f64 / proof_size_kb_estimate
+    );
     println!();
-    println!("Key insight: Proof size is constant (~{:.0} KB) regardless of batch size!", proof_size_kb_estimate);
+    println!(
+        "Key insight: Proof size is constant (~{:.0} KB) regardless of batch size!",
+        proof_size_kb_estimate
+    );
     println!("             Larger batches = greater space savings!");
     println!();
 
@@ -203,7 +231,10 @@ pub fn main() {
     println!("Phase 4: Proof Verification");
     println!("----------------------------");
     println!("Verifying the zkVM proof cryptographically...");
-    println!("This proves that all {} signatures were correctly verified", NUM_SIGNATURES);
+    println!(
+        "This proves that all {} signatures were correctly verified",
+        NUM_SIGNATURES
+    );
     println!("without re-executing the guest program.");
     println!();
     let start_verify = Instant::now();
@@ -231,20 +262,42 @@ pub fn main() {
     println!("Performance Metrics:");
     println!("  • Proof Generation:  {:?}", prove_time);
     println!("  • Proof Verification: {:?}", verify_time);
-    println!("  • Proving Throughput: {:.2} sigs/sec", NUM_SIGNATURES as f64 / prove_time.as_secs_f64());
-    println!("  • Speedup Factor:    {:.2}x", prove_time.as_secs_f64() / verify_time.as_secs_f64());
+    println!(
+        "  • Proving Throughput: {:.2} sigs/sec",
+        NUM_SIGNATURES as f64 / prove_time.as_secs_f64()
+    );
+    println!(
+        "  • Speedup Factor:    {:.2}x",
+        prove_time.as_secs_f64() / verify_time.as_secs_f64()
+    );
     println!();
     println!("Space Efficiency:");
     println!("  • Individual sigs:   ~{} KB", individual_sig_size_kb);
-    println!("  • Aggregated proof:  ~{:.0} KB ({:.2} MB)", proof_size_kb_estimate, proof_size_mb);
-    println!("  • Space saved:       {:.0} KB ({:.1}%)", space_saved_kb, space_saved_percent);
-    println!("  • Compression ratio: {:.2}x", individual_sig_size_kb as f64 / proof_size_kb_estimate);
+    println!(
+        "  • Aggregated proof:  ~{:.0} KB ({:.2} MB)",
+        proof_size_kb_estimate, proof_size_mb
+    );
+    println!(
+        "  • Space saved:       {:.0} KB ({:.1}%)",
+        space_saved_kb, space_saved_percent
+    );
+    println!(
+        "  • Compression ratio: {:.2}x",
+        individual_sig_size_kb as f64 / proof_size_kb_estimate
+    );
     println!();
     println!("Key Benefits:");
     println!("  ✓ Constant proof size regardless of batch size");
-    println!("  ✓ Fast verification (~{:.2}s) vs slow proving (~{:.2}s)", verify_time.as_secs_f64(), prove_time.as_secs_f64());
+    println!(
+        "  ✓ Fast verification (~{:.2}s) vs slow proving (~{:.2}s)",
+        verify_time.as_secs_f64(),
+        prove_time.as_secs_f64()
+    );
     println!("  ✓ Post-quantum security (XMSS with Poseidon)");
-    println!("  ✓ Succinct proof replaces {} individual signatures", NUM_SIGNATURES);
+    println!(
+        "  ✓ Succinct proof replaces {} individual signatures",
+        NUM_SIGNATURES
+    );
     println!();
     println!("═══════════════════════════════════════════════════");
 }

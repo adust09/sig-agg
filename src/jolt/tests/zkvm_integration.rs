@@ -4,11 +4,11 @@
 //! and proof verification functionality.
 
 use hashsig::{
-    MESSAGE_LENGTH,
     signature::{
-        SignatureScheme,
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
+        SignatureScheme,
     },
+    MESSAGE_LENGTH,
 };
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
@@ -48,8 +48,8 @@ fn test_proof_generation() {
             let mut local_rng = rand::rng();
             let epoch = i as u32;
             let message = [i as u8; MESSAGE_LENGTH];
-            let signature = XMSSSignature::sign(&mut local_rng, &sk, epoch, &message)
-                .expect("Signing failed");
+            let signature =
+                XMSSSignature::sign(&mut local_rng, &sk, epoch, &message).expect("Signing failed");
 
             // Clone public key for this item
             let pk_clone = bincode::deserialize(&pk_bytes).expect("PK deserialization failed");
@@ -111,9 +111,7 @@ fn test_proof_verification() {
             .collect()
     };
 
-    let batch = AggregationBatch {
-        items: gen_items(),
-    };
+    let batch = AggregationBatch { items: gen_items() };
 
     let target_dir = "/tmp/jolt-test-verify";
     let mut program = guest::compile_verify_aggregation(target_dir);
@@ -127,9 +125,7 @@ fn test_proof_verification() {
     let (verified_count, proof, io) = prove_fn(batch);
     assert_eq!(verified_count, 10);
 
-    let batch_verify = AggregationBatch {
-        items: gen_items(),
-    };
+    let batch_verify = AggregationBatch { items: gen_items() };
 
     let is_valid = verify_fn(batch_verify, verified_count, io.panic, proof);
     assert!(is_valid);

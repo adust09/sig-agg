@@ -39,7 +39,12 @@ pub struct AggregationBatch {
 /// signatures from different keys can be batched together.
 ///
 /// Returns the count of successfully verified signatures
-#[jolt::provable(memory_size = 10240, max_trace_length = 65536)]
+#[jolt::provable(
+    stack_size = 65_536,
+    memory_size = 16_777_216,
+    max_input_size = 8_388_608,
+    max_trace_length = 65_536,
+)]
 fn verify_aggregation(batch: AggregationBatch) -> u32 {
     let mut verified_count: u32 = 0;
 

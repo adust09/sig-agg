@@ -10,41 +10,33 @@ use serde::{Deserialize, Serialize};
 // The signature scheme we are going to benchmark.
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
-/// Aggregation mode determining validation and verification logic
-#[derive(Serialize, Deserialize)]
-pub enum AggregationMode {
-    /// All signatures share the same public key
-    SingleKey,
-    /// Signatures may have different public keys
-    MultiKey,
-}
-
 /// A single XMSS verification item.
+///
+/// Each item contains its own public key, supporting multi-key aggregation.
 #[derive(Serialize, Deserialize)]
 pub struct VerificationItem {
     pub message: [u8; MESSAGE_LENGTH],
     pub epoch: u32,
     pub signature: <XMSSSignature as SignatureScheme>::Signature,
-    /// Public key (optional - required for MultiKey mode, None for SingleKey)
-    pub public_key: Option<<XMSSSignature as SignatureScheme>::PublicKey>,
+    /// Public key for this signature (required)
+    pub public_key: <XMSSSignature as SignatureScheme>::PublicKey,
 }
 
 /// The aggregation batch for zkVM verification
+///
+/// Each item in the batch includes its own public key, allowing
+/// signatures from different keys to be aggregated together.
 #[derive(Serialize, Deserialize)]
 pub struct AggregationBatch {
-    /// Aggregation mode for this batch
-    pub mode: AggregationMode,
-    /// Shared public key (SingleKey mode only)
-    pub public_key: Option<<XMSSSignature as SignatureScheme>::PublicKey>,
-    /// Collection of verification items
+    /// Collection of verification items (each with its own public key)
     pub items: Vec<VerificationItem>,
 }
 
 /// Verify aggregated signature batch in zkVM
 ///
-/// This function verifies all signatures in the batch according to the aggregation mode:
-/// - SingleKey: Uses shared public key from batch
-/// - MultiKey: Uses per-item public keys
+/// This function verifies all signatures in the batch, where each signature
+/// includes its own public key. This enables multi-key aggregation where
+/// signatures from different keys can be batched together.
 ///
 /// Returns the count of successfully verified signatures
 #[jolt::provable(memory_size = 10240, max_trace_length = 65536)]
@@ -52,36 +44,13 @@ fn verify_aggregation(batch: AggregationBatch) -> u32 {
     let mut verified_count: u32 = 0;
 
     for item in batch.items {
-        let is_valid = match batch.mode {
-            AggregationMode::SingleKey => {
-                // Single key: use shared public key from batch
-                if let Some(ref pk) = batch.public_key {
-                    SIGWinternitzLifetime18W1::verify(
-                        pk,
-                        item.epoch,
-                        &item.message,
-                        &item.signature,
-                    )
-                } else {
-                    // SingleKey mode requires public_key
-                    false
-                }
-            }
-            AggregationMode::MultiKey => {
-                // Multi-key: use item-specific public key
-                if let Some(ref pk) = item.public_key {
-                    SIGWinternitzLifetime18W1::verify(
-                        pk,
-                        item.epoch,
-                        &item.message,
-                        &item.signature,
-                    )
-                } else {
-                    // MultiKey mode requires per-item public_key
-                    false
-                }
-            }
-        };
+        // Each item has its own public key
+        let is_valid = SIGWinternitzLifetime18W1::verify(
+            &item.public_key,
+            item.epoch,
+            &item.message,
+            &item.signature,
+        );
 
         if is_valid {
             verified_count += 1;

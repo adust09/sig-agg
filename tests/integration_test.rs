@@ -1,10 +1,6 @@
 // Integration tests for end-to-end aggregation workflows
 
-use sig_agg::{
-    aggregator,
-    error::AggregationError,
-    types::{AggregationMode, VerificationItem},
-};
+use sig_agg::{aggregator, error::AggregationError, types::VerificationItem};
 
 use hashsig::{
     MESSAGE_LENGTH,
@@ -30,33 +26,30 @@ fn test_e2e_aggregation_small_batch() {
             let signature =
                 XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
+            let pk_bytes = bincode::serialize(&pk).unwrap();
+            let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None, // SingleKey mode
+                public_key: pk_clone,
             }
         })
         .collect();
 
     // Aggregate signatures
-    let mut batch = aggregator::aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation should succeed");
-
-    // Set the shared public key for SingleKey mode
-    batch.public_key = Some(pk);
+    let batch = aggregator::aggregate(items).expect("Aggregation should succeed");
 
     // Verify batch structure
-    assert_eq!(batch.mode, AggregationMode::SingleKey);
     assert_eq!(batch.items.len(), 10);
-    assert!(batch.public_key.is_some());
 }
 
 /// Test end-to-end aggregation with invalid signature rejection
 #[test]
 fn test_e2e_invalid_signature_rejection() {
     let mut rng = rand::rng();
-    let (_pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
+    let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
 
     // Generate valid signatures
     let mut items: Vec<VerificationItem> = (0..5)
@@ -66,11 +59,14 @@ fn test_e2e_invalid_signature_rejection() {
             let signature =
                 XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
+            let pk_bytes = bincode::serialize(&pk).unwrap();
+            let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None,
+                public_key: pk_clone,
             }
         })
         .collect();
@@ -80,16 +76,18 @@ fn test_e2e_invalid_signature_rejection() {
     let wrong_signature =
         XMSSSignature::sign(&sk, 5, &wrong_message).expect("Signing should succeed");
 
+    let pk_bytes = bincode::serialize(&pk).unwrap();
+    let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
     items.push(VerificationItem {
         message: [5u8; MESSAGE_LENGTH], // Different from signed message
         epoch: 5,
         signature: wrong_signature,
-        public_key: None,
+        public_key: pk_clone,
     });
 
     // Aggregation should still succeed (validation happens at verification time)
-    let batch = aggregator::aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation should succeed");
+    let batch = aggregator::aggregate(items).expect("Aggregation should succeed");
 
     assert_eq!(batch.items.len(), 6);
     // In a real zkVM verification, the invalid signature would be detected
@@ -120,7 +118,7 @@ fn test_e2e_multi_key_aggregation() {
             message,
             epoch,
             signature,
-            public_key: Some(pk_clone),
+            public_key: pk_clone,
         });
     }
 
@@ -137,7 +135,7 @@ fn test_e2e_multi_key_aggregation() {
             message,
             epoch,
             signature,
-            public_key: Some(pk_clone),
+            public_key: pk_clone,
         });
     }
 
@@ -154,17 +152,14 @@ fn test_e2e_multi_key_aggregation() {
             message,
             epoch,
             signature,
-            public_key: Some(pk_clone),
+            public_key: pk_clone,
         });
     }
 
     // Aggregate multi-key batch
-    let batch = aggregator::aggregate(items, AggregationMode::MultiKey)
-        .expect("Multi-key aggregation should succeed");
+    let batch = aggregator::aggregate(items).expect("Multi-key aggregation should succeed");
 
-    assert_eq!(batch.mode, AggregationMode::MultiKey);
     assert_eq!(batch.items.len(), 9);
-    assert!(batch.public_key.is_none()); // MultiKey mode doesn't use shared key
 }
 
 /// Test cache loading behavior (simulated)
@@ -183,19 +178,19 @@ fn test_e2e_cache_loading() {
             let signature =
                 XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
+            let pk_bytes = bincode::serialize(&pk).unwrap();
+            let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None,
+                public_key: pk_clone,
             }
         })
         .collect();
 
-    let mut batch = aggregator::aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation should succeed");
-
-    batch.public_key = Some(pk);
+    let batch = aggregator::aggregate(items).expect("Aggregation should succeed");
 
     // Serialize batch
     let serialized = bincode::serialize(&batch).expect("Serialization should succeed");
@@ -207,7 +202,6 @@ fn test_e2e_cache_loading() {
     // Verify deserialization succeeded
     assert!(deserialized.is_ok());
     let deserialized_batch = deserialized.unwrap();
-    assert_eq!(deserialized_batch.mode, batch.mode);
     assert_eq!(deserialized_batch.items.len(), batch.items.len());
 }
 
@@ -215,12 +209,16 @@ fn test_e2e_cache_loading() {
 #[test]
 fn test_e2e_error_handling() {
     // Empty batch
-    let result = aggregator::aggregate(vec![], AggregationMode::SingleKey);
+    let result = aggregator::aggregate(vec![]);
     assert!(matches!(result, Err(AggregationError::EmptyBatch)));
 
-    // Duplicate epoch in SingleKey mode
+    // Duplicate (key, epoch) pair
     let mut rng = rand::rng();
-    let (_pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
+    let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
+
+    let pk_bytes = bincode::serialize(&pk).unwrap();
+    let pk_clone1 = bincode::deserialize(&pk_bytes).unwrap();
+    let pk_clone2 = bincode::deserialize(&pk_bytes).unwrap();
 
     let items: Vec<VerificationItem> = vec![
         VerificationItem {
@@ -228,20 +226,20 @@ fn test_e2e_error_handling() {
             epoch: 0,
             signature: XMSSSignature::sign(&sk, 0, &[0u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: None,
+            public_key: pk_clone1,
         },
         VerificationItem {
             message: [1u8; MESSAGE_LENGTH],
             epoch: 0, // Duplicate!
             signature: XMSSSignature::sign(&sk, 0, &[1u8; MESSAGE_LENGTH])
                 .expect("Signing should succeed"),
-            public_key: None,
+            public_key: pk_clone2,
         },
     ];
 
-    let result = aggregator::aggregate(items, AggregationMode::SingleKey);
+    let result = aggregator::aggregate(items);
     assert!(matches!(
         result,
-        Err(AggregationError::DuplicateEpoch { epoch: 0 })
+        Err(AggregationError::DuplicateKeyEpochPair { epoch: 0, .. })
     ));
 }

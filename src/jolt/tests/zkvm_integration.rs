@@ -13,7 +13,7 @@ use hashsig::{
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
-use guest::{AggregationBatch, AggregationMode, VerificationItem};
+use guest::{AggregationBatch, VerificationItem};
 
 /// Test: Guest program compilation succeeds
 #[test]
@@ -40,6 +40,9 @@ fn test_proof_generation() {
     let mut rng = rand::rng();
     let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 15);
 
+    // Serialize public key for cloning
+    let pk_bytes = bincode::serialize(&pk).expect("PK serialization failed");
+
     let items: Vec<VerificationItem> = (0..10)
         .map(|i| {
             let mut local_rng = rand::rng();
@@ -48,20 +51,19 @@ fn test_proof_generation() {
             let signature = XMSSSignature::sign(&mut local_rng, &sk, epoch, &message)
                 .expect("Signing failed");
 
+            // Clone public key for this item
+            let pk_clone = bincode::deserialize(&pk_bytes).expect("PK deserialization failed");
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None,
+                public_key: pk_clone,
             }
         })
         .collect();
 
-    let batch = AggregationBatch {
-        mode: AggregationMode::SingleKey,
-        public_key: Some(pk),
-        items,
-    };
+    let batch = AggregationBatch { items };
 
     let target_dir = "/tmp/jolt-test-proof-gen";
     let mut program = guest::compile_verify_aggregation(target_dir);
@@ -83,9 +85,8 @@ fn test_proof_verification() {
     let mut rng = rand::rng();
     let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 15);
 
-    // Clone pk via serialization for later use
+    // Serialize public key for cloning
     let pk_bytes = bincode::serialize(&pk).expect("PK serialization failed");
-    let pk_clone = bincode::deserialize(&pk_bytes).expect("PK deserialization failed");
 
     // Helper to generate items
     let gen_items = || -> Vec<VerificationItem> {
@@ -97,19 +98,20 @@ fn test_proof_verification() {
                 let signature = XMSSSignature::sign(&mut local_rng, &sk, epoch, &message)
                     .expect("Signing failed");
 
+                // Clone public key for this item
+                let pk_clone = bincode::deserialize(&pk_bytes).expect("PK deserialization failed");
+
                 VerificationItem {
                     message,
                     epoch,
                     signature,
-                    public_key: None,
+                    public_key: pk_clone,
                 }
             })
             .collect()
     };
 
     let batch = AggregationBatch {
-        mode: AggregationMode::SingleKey,
-        public_key: Some(pk),
         items: gen_items(),
     };
 
@@ -126,8 +128,6 @@ fn test_proof_verification() {
     assert_eq!(verified_count, 10);
 
     let batch_verify = AggregationBatch {
-        mode: AggregationMode::SingleKey,
-        public_key: Some(pk_clone),
         items: gen_items(),
     };
 

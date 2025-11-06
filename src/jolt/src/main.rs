@@ -12,7 +12,7 @@ use rayon::{iter::IntoParallelIterator, prelude::*};
 const NUM_SIGNATURES: usize = 1000;
 
 // Use the guest types directly to avoid duplication
-use guest::{AggregationBatch, AggregationMode, VerificationItem};
+use guest::{AggregationBatch, VerificationItem};
 
 /// Generates or loads cached public key and 1000 signatures to be verified.
 fn setup_benchmark_data() -> AggregationBatch {
@@ -50,8 +50,11 @@ fn setup_benchmark_data() -> AggregationBatch {
     // Generate a key active only for the epochs we need, making this step fast.
     let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, NUM_SIGNATURES);
 
+    // Serialize public key once for cloning
+    let pk_bytes = bincode::serialize(&pk).expect("Failed to serialize public key");
+
     // Generate 1000 signatures in parallel for speed.
-    // For SingleKey mode, items don't include individual public keys
+    // Each item includes its own copy of the public key
     let items: Vec<VerificationItem> = (0..NUM_SIGNATURES)
         .into_par_iter()
         .map(|i| {
@@ -66,20 +69,19 @@ fn setup_benchmark_data() -> AggregationBatch {
             let signature = SIGWinternitzLifetime18W1::sign(&mut thread_rng, &sk, epoch, &message)
                 .expect("Signing failed");
 
+            // Clone public key via serialization for this item
+            let pk_clone = bincode::deserialize(&pk_bytes).expect("Failed to deserialize public key");
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None, // SingleKey mode: shared public key in batch
+                public_key: pk_clone, // Each item has its own public key
             }
         })
         .collect();
 
-    let aggregation_batch = AggregationBatch {
-        mode: AggregationMode::SingleKey,
-        public_key: Some(pk), // Shared public key for all signatures
-        items,
-    };
+    let aggregation_batch = AggregationBatch { items };
 
     // Cache the generated data
     if let Err(e) = fs::create_dir_all(cache_dir) {
@@ -112,7 +114,6 @@ pub fn main() {
     println!("produce a succinct proof of verification.");
     println!();
     println!("Configuration:");
-    println!("- Aggregation Mode: SingleKey (all signatures from one public key)");
     println!("- Batch Size: {} signatures", NUM_SIGNATURES);
     println!("- XMSS Variant: Lifetime 2^18 with Poseidon hashing");
     println!("- zkVM: Jolt (a16z)");
@@ -224,7 +225,6 @@ pub fn main() {
     println!("═══════════════════════════════════════════════════");
     println!();
     println!("Batch Configuration:");
-    println!("  • Aggregation Mode:  SingleKey");
     println!("  • Batch Size:        {} signatures", NUM_SIGNATURES);
     println!("  • Verified Count:    {} signatures", verified_count);
     println!();

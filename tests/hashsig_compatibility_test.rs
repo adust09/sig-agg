@@ -11,7 +11,7 @@ use hashsig::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
     },
 };
-use sig_agg::{AggregationError, AggregationMode, VerificationItem, aggregate};
+use sig_agg::{AggregationError, VerificationItem, aggregate};
 
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
@@ -31,20 +31,20 @@ fn test_poseidon_xmss_aggregation() {
             let signature =
                 XMSSSignature::sign(&sk, epoch, &message).expect("hash-sig signing should succeed");
 
+            let pk_bytes = bincode::serialize(&pk).unwrap();
+            let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None,
+                public_key: pk_clone,
             }
         })
         .collect();
 
     // Aggregate
-    let mut batch = aggregate(items, AggregationMode::SingleKey)
-        .expect("Aggregation with hash-sig signatures should succeed");
-
-    batch.public_key = Some(pk);
+    let batch = aggregate(items).expect("Aggregation with hash-sig signatures should succeed");
 
     assert_eq!(batch.items.len(), 10);
     println!("✓ Successfully aggregated 10 hash-sig Poseidon XMSS signatures");
@@ -89,101 +89,108 @@ fn test_aggregation_preserves_validity() {
                 "Signature should be valid before aggregation"
             );
 
+            let pk_bytes = bincode::serialize(&pk).unwrap();
+            let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
+
             VerificationItem {
                 message,
                 epoch,
                 signature,
-                public_key: None,
+                public_key: pk_clone,
             }
         })
         .collect();
 
-    // Aggregate
-    let batch = aggregate(items, AggregationMode::SingleKey).expect("Aggregation should succeed");
+    let batch = aggregate(items).expect("Aggregation should succeed");
 
-    // Verify signatures are still valid after aggregation
+    // Verify signatures still valid after aggregation
     for item in &batch.items {
-        let is_valid = XMSSSignature::verify(&pk, item.epoch, &item.message, &item.signature);
-        assert!(is_valid, "Signature should remain valid after aggregation");
+        let is_valid =
+            XMSSSignature::verify(&item.public_key, item.epoch, &item.message, &item.signature);
+        assert!(
+            is_valid,
+            "Signature should remain valid after aggregation"
+        );
     }
 
     println!("✓ Aggregation preserves hash-sig signature validity");
 }
 
-/// Test: Different Poseidon parameter compatibility
+/// Test: Serialization/deserialization of hash-sig signatures
 #[test]
-fn test_poseidon_parameter_compatibility() {
-    // This test verifies that the aggregation system works with
-    // the specific Poseidon parameterization used by hash-sig:
-    // lifetime_2_to_the_18::winternitz
-
+fn test_hash_sig_signature_serialization() {
     let mut rng = rand::rng();
     let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
 
     let epoch = 0u32;
-    let message = [0u8; MESSAGE_LENGTH];
+    let message = [123u8; MESSAGE_LENGTH];
+    let signature = XMSSSignature::sign(&sk, epoch, &message).expect("Signing should succeed");
 
-    // Create signature with Poseidon-based XMSS
-    let signature =
-        XMSSSignature::sign(&sk, epoch, &message).expect("Poseidon XMSS signing should succeed");
+    let pk_bytes = bincode::serialize(&pk).unwrap();
+    let pk_clone = bincode::deserialize(&pk_bytes).unwrap();
 
-    // Verify
-    let is_valid = XMSSSignature::verify(&pk, epoch, &message, &signature);
-    assert!(is_valid, "Poseidon XMSS signature should verify");
-
-    // Aggregate
     let item = VerificationItem {
         message,
         epoch,
         signature,
-        public_key: None,
+        public_key: pk_clone,
     };
 
-    let batch = aggregate(vec![item], AggregationMode::SingleKey)
-        .expect("Aggregation should work with Poseidon XMSS");
+    let batch = aggregate(vec![item], ).expect("Aggregation should succeed");
 
-    assert_eq!(batch.items.len(), 1);
-    println!("✓ Poseidon parameter set is compatible");
+    // Serialize batch
+    let serialized = bincode::serialize(&batch).expect("Serialization should succeed");
+
+    // Deserialize batch
+    use sig_agg::types::AggregationBatch;
+    let deserialized: AggregationBatch =
+        bincode::deserialize(&serialized).expect("Deserialization should succeed");
+
+    // Verify deserialized signature is still valid
+    let item = &deserialized.items[0];
+    let is_valid = XMSSSignature::verify(&item.public_key, item.epoch, &item.message, &item.signature);
+    assert!(is_valid, "Deserialized signature should be valid");
+
+    println!("✓ hash-sig signatures serialize/deserialize correctly");
 }
 
-/// Test: Epoch constraints from hash-sig
+/// Test: Duplicate epoch detection with hash-sig signatures
 #[test]
-fn test_epoch_constraints() {
+fn test_hash_sig_duplicate_epoch_detection() {
     let mut rng = rand::rng();
+    let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 20);
 
-    // Key generated for epochs 0-9
-    let (pk, sk) = XMSSSignature::key_gen(&mut rng, 0, 10);
+    let message1 = [1u8; MESSAGE_LENGTH];
+    let message2 = [2u8; MESSAGE_LENGTH];
 
-    // Valid epoch (within range)
-    let valid_sig = XMSSSignature::sign(&sk, 5, &[0u8; MESSAGE_LENGTH])
-        .expect("Signing within epoch range should succeed");
+    let signature1 = XMSSSignature::sign(&sk, 0, &message1).expect("Signing should succeed");
+    let signature2 = XMSSSignature::sign(&sk, 0, &message2).expect("Signing should succeed");
 
-    assert!(
-        XMSSSignature::verify(&pk, 5, &[0u8; MESSAGE_LENGTH], &valid_sig),
-        "Valid epoch signature should verify"
-    );
+    let pk_bytes = bincode::serialize(&pk).unwrap();
+    let pk_clone1 = bincode::deserialize(&pk_bytes).unwrap();
+    let pk_clone2 = bincode::deserialize(&pk_bytes).unwrap();
 
-    // Aggregation should enforce epoch uniqueness
     let items = vec![
         VerificationItem {
-            message: [0u8; MESSAGE_LENGTH],
+            message: message1,
             epoch: 0,
-            signature: XMSSSignature::sign(&sk, 0, &[0u8; MESSAGE_LENGTH]).unwrap(),
-            public_key: None,
+            signature: signature1,
+            public_key: pk_clone1,
         },
         VerificationItem {
-            message: [1u8; MESSAGE_LENGTH],
-            epoch: 0, // Duplicate epoch
-            signature: XMSSSignature::sign(&sk, 0, &[1u8; MESSAGE_LENGTH]).unwrap(),
-            public_key: None,
+            message: message2,
+            epoch: 0, // Duplicate epoch!
+            signature: signature2,
+            public_key: pk_clone2,
         },
     ];
 
-    let result = aggregate(items, AggregationMode::SingleKey);
+    let result = aggregate(items);
+
     assert!(
-        matches!(result, Err(AggregationError::DuplicateEpoch { epoch: 0 })),
-        "Should reject duplicate epochs"
+        matches!(result, Err(AggregationError::DuplicateKeyEpochPair { epoch: 0, .. })),
+        "Should detect duplicate (key, epoch) pair"
     );
 
-    println!("✓ Epoch constraints enforced correctly");
+    println!("✓ Duplicate (key, epoch) pair detection works with hash-sig");
 }

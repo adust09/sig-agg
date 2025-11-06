@@ -1,9 +1,9 @@
-//! Single-key aggregation example
+//! Key aggregation example
 //!
 //! This example demonstrates how to aggregate multiple XMSS signatures
 //! from a single public key using the sig-agg library.
 //!
-//! Run with: `cargo run --example single_key_aggregation`
+//! Run with: `cargo run --example key_aggregation`
 
 use hashsig::{
     MESSAGE_LENGTH,
@@ -17,7 +17,7 @@ use sig_agg::{AggregationMode, VerificationItem, aggregate};
 type XMSSSignature = SIGWinternitzLifetime18W1;
 
 fn main() {
-    println!("=== Single-Key Aggregation Example ===\n");
+    println!("=== Key Aggregation Example ===\n");
 
     // Step 1: Generate a keypair
     println!("1. Generating XMSS keypair...");

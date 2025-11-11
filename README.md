@@ -6,6 +6,6 @@ Post-quantum signature aggregation system that enables efficient batch verificat
 ```bash
 cargo build
 cargo test
-# Run Jolt zkVM end-to-end benchmark (1000 signatures)
+# Run Jolt zkVM end-to-end benchmark (default 100 signatures)
 cargo run -p jolt --release
 ```

@@ -51,21 +51,34 @@ fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
         let start = Instant::now();
 
         match fs::read(&cache_file) {
-            Ok(cached_data) => match bincode::deserialize::<AggregationBatch>(&cached_data) {
-                Ok(data) => {
-                    let payload_len = cached_data.len();
-                    println!(
-                        "Cached batch payload: {} bytes (~{:.2} MiB)",
-                        payload_len,
-                        payload_len as f64 / (1024.0 * 1024.0)
-                    );
-                    println!("Benchmark data loaded from cache in {:?}", start.elapsed());
-                    return data;
+            Ok(cached_data) => {
+                let payload_len = cached_data.len();
+                match bincode::deserialize::<AggregationBatch>(&cached_data) {
+                    Ok(data) => {
+                        let cached_items = data.items.len();
+                        if cached_items == num_signatures {
+                            println!(
+                                "Cached batch payload: {} bytes (~{:.2} MiB)",
+                                payload_len,
+                                payload_len as f64 / (1024.0 * 1024.0)
+                            );
+                            println!("Benchmark data loaded from cache in {:?}", start.elapsed());
+                            return data;
+                        }
+
+                        println!(
+                            "Cached batch contains {} signatures but configuration requests {}; regenerating cache...",
+                            cached_items, num_signatures
+                        );
+                        if let Err(e) = fs::remove_file(&cache_file) {
+                            println!("Failed to delete stale cache '{}': {}", cache_file, e);
+                        }
+                    }
+                    Err(e) => {
+                        println!("Failed to deserialize cached data: {}, regenerating...", e);
+                    }
                 }
-                Err(e) => {
-                    println!("Failed to deserialize cached data: {}, regenerating...", e);
-                }
-            },
+            }
             Err(e) => {
                 println!("Failed to read cache file: {}, regenerating...", e);
             }

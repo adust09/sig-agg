@@ -107,10 +107,7 @@ fn test_aggregation_preserves_validity() {
     for item in &batch.items {
         let is_valid =
             XMSSSignature::verify(&item.public_key, item.epoch, &item.message, &item.signature);
-        assert!(
-            is_valid,
-            "Signature should remain valid after aggregation"
-        );
+        assert!(is_valid, "Signature should remain valid after aggregation");
     }
 
     println!("✓ Aggregation preserves hash-sig signature validity");
@@ -136,7 +133,7 @@ fn test_hash_sig_signature_serialization() {
         public_key: pk_clone,
     };
 
-    let batch = aggregate(vec![item], ).expect("Aggregation should succeed");
+    let batch = aggregate(vec![item]).expect("Aggregation should succeed");
 
     // Serialize batch
     let serialized = bincode::serialize(&batch).expect("Serialization should succeed");
@@ -148,7 +145,8 @@ fn test_hash_sig_signature_serialization() {
 
     // Verify deserialized signature is still valid
     let item = &deserialized.items[0];
-    let is_valid = XMSSSignature::verify(&item.public_key, item.epoch, &item.message, &item.signature);
+    let is_valid =
+        XMSSSignature::verify(&item.public_key, item.epoch, &item.message, &item.signature);
     assert!(is_valid, "Deserialized signature should be valid");
 
     println!("✓ hash-sig signatures serialize/deserialize correctly");
@@ -188,7 +186,10 @@ fn test_hash_sig_duplicate_epoch_detection() {
     let result = aggregate(items);
 
     assert!(
-        matches!(result, Err(AggregationError::DuplicateKeyEpochPair { epoch: 0, .. })),
+        matches!(
+            result,
+            Err(AggregationError::DuplicateKeyEpochPair { epoch: 0, .. })
+        ),
         "Should detect duplicate (key, epoch) pair"
     );
 

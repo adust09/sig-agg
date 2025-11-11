@@ -1,9 +1,9 @@
 use hashsig::{
-    MESSAGE_LENGTH,
     signature::{
-        SignatureScheme,
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
+        SignatureScheme,
     },
+    MESSAGE_LENGTH,
 };
 use serde::{Deserialize, Serialize};
 
@@ -39,11 +39,13 @@ pub struct AggregationBatch {
 /// signatures from different keys can be batched together.
 ///
 /// Returns the count of successfully verified signatures
+// Keep resource hints as small powers of two. Oversized settings (e.g. 2^24 memory words)
+// force Dory to commit to multi-GB polynomials and quickly OOM the host.
 #[jolt::provable(
     stack_size = 65_536,
-    memory_size = 16_777_216,
-    max_input_size = 8_388_608,
-    max_trace_length = 65_536,
+    memory_size = 8_388_608,
+    max_input_size = 4_194_304,
+    max_trace_length = 65_536
 )]
 fn verify_aggregation(batch: AggregationBatch) -> u32 {
     let mut verified_count: u32 = 0;

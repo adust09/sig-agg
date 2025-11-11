@@ -388,9 +388,7 @@ mod tests {
             public_key: pk_clone,
         };
 
-        let batch = AggregationBatch {
-            items: vec![item],
-        };
+        let batch = AggregationBatch { items: vec![item] };
 
         assert_eq!(batch.items.len(), 1);
     }

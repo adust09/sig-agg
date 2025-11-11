@@ -1,4 +1,4 @@
-use std::{fs, path::Path, time::Instant};
+use std::{env, fs, path::Path, time::Instant};
 
 use hashsig::{
     signature::{
@@ -9,24 +9,56 @@ use hashsig::{
 };
 use rayon::{iter::IntoParallelIterator, prelude::*};
 
-const NUM_SIGNATURES: usize = 100;
+const DEFAULT_NUM_SIGNATURES: usize = 100;
+
+fn benchmark_batch_size() -> usize {
+    match env::var("NUM_SIGNATURES_OVERRIDE") {
+        Ok(raw) => match raw.parse::<usize>() {
+            Ok(value) if value > 0 => {
+                println!(
+                    "Using NUM_SIGNATURES_OVERRIDE={}, overriding default batch size {}",
+                    value, DEFAULT_NUM_SIGNATURES
+                );
+                value
+            }
+            _ => {
+                println!(
+                    "NUM_SIGNATURES_OVERRIDE must be a positive integer (got '{}'); falling back to {}",
+                    raw, DEFAULT_NUM_SIGNATURES
+                );
+                DEFAULT_NUM_SIGNATURES
+            }
+        },
+        Err(_) => DEFAULT_NUM_SIGNATURES,
+    }
+}
 
 // Use the guest types directly to avoid duplication
 use guest::{AggregationBatch, VerificationItem};
 
 /// Generates or loads cached public key and 100 signatures to be verified.
-fn setup_benchmark_data() -> AggregationBatch {
+fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
     let cache_dir = "./tmp";
-    let cache_file = "./tmp/benchmark_data.bin";
+    let cache_file = if num_signatures == DEFAULT_NUM_SIGNATURES {
+        "./tmp/benchmark_data.bin".to_string()
+    } else {
+        format!("./tmp/benchmark_data_{}.bin", num_signatures)
+    };
 
     // Try to load from cache first
-    if Path::new(cache_file).exists() {
+    if Path::new(&cache_file).exists() {
         println!("Loading benchmark data from cache...");
         let start = Instant::now();
 
-        match fs::read(cache_file) {
+        match fs::read(&cache_file) {
             Ok(cached_data) => match bincode::deserialize::<AggregationBatch>(&cached_data) {
                 Ok(data) => {
+                    let payload_len = cached_data.len();
+                    println!(
+                        "Cached batch payload: {} bytes (~{:.2} MiB)",
+                        payload_len,
+                        payload_len as f64 / (1024.0 * 1024.0)
+                    );
                     println!("Benchmark data loaded from cache in {:?}", start.elapsed());
                     return data;
                 }
@@ -42,20 +74,20 @@ fn setup_benchmark_data() -> AggregationBatch {
 
     println!(
         "Generating fresh benchmark data: {} signatures...",
-        NUM_SIGNATURES
+        num_signatures
     );
     let start = Instant::now();
     let mut rng = rand::rng();
 
     // Generate a key active only for the epochs we need, making this step fast.
-    let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, NUM_SIGNATURES);
+    let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, num_signatures);
 
     // Serialize public key once for cloning
     let pk_bytes = bincode::serialize(&pk).expect("Failed to serialize public key");
 
     // Generate 1000 signatures in parallel for speed.
     // Each item includes its own copy of the public key
-    let items: Vec<VerificationItem> = (0..NUM_SIGNATURES)
+    let items: Vec<VerificationItem> = (0..num_signatures)
         .into_par_iter()
         .map(|i| {
             let epoch = i as u32;
@@ -84,20 +116,25 @@ fn setup_benchmark_data() -> AggregationBatch {
     let aggregation_batch = AggregationBatch { items };
 
     // Cache the generated data
-    if let Err(e) = fs::create_dir_all(cache_dir) {
-        println!("Failed to create cache directory: {}", e);
-    } else {
-        match bincode::serialize(&aggregation_batch) {
-            Ok(serialized_data) => {
-                if let Err(e) = fs::write(cache_file, &serialized_data) {
-                    println!("Failed to write cache file: {}", e);
-                } else {
-                    println!("Benchmark data cached for future runs");
-                }
+    match bincode::serialize(&aggregation_batch) {
+        Ok(serialized_data) => {
+            let payload_len = serialized_data.len();
+            println!(
+                "Generated batch payload: {} bytes (~{:.2} MiB)",
+                payload_len,
+                payload_len as f64 / (1024.0 * 1024.0)
+            );
+
+            if let Err(e) = fs::create_dir_all(cache_dir) {
+                println!("Failed to create cache directory: {}", e);
+            } else if let Err(e) = fs::write(&cache_file, &serialized_data) {
+                println!("Failed to write cache file: {}", e);
+            } else {
+                println!("Benchmark data cached for future runs");
             }
-            Err(e) => {
-                println!("Failed to serialize data for caching: {}", e);
-            }
+        }
+        Err(e) => {
+            println!("Failed to serialize data for caching: {}", e);
         }
     }
 
@@ -106,6 +143,8 @@ fn setup_benchmark_data() -> AggregationBatch {
 }
 
 pub fn main() {
+    let num_signatures = benchmark_batch_size();
+
     println!("XMSS Signature Aggregation Benchmark - Jolt zkVM");
     println!("===================================================");
     println!();
@@ -114,7 +153,7 @@ pub fn main() {
     println!("produce a succinct proof of verification.");
     println!();
     println!("Configuration:");
-    println!("- Batch Size: {} signatures", NUM_SIGNATURES);
+    println!("- Batch Size: {} signatures", num_signatures);
     println!("- XMSS Variant: Lifetime 2^18 with Poseidon hashing");
     println!("- zkVM: Jolt (a16z)");
     println!();
@@ -124,13 +163,13 @@ pub fn main() {
     println!("------------------------------------------------------");
     println!(
         "This phase creates {} XMSS signatures or loads them from cache.",
-        NUM_SIGNATURES
+        num_signatures
     );
     println!(
         "Each signature is created with a unique epoch (0-{}).",
-        NUM_SIGNATURES - 1
+        num_signatures - 1
     );
-    let verification_data = setup_benchmark_data();
+    let verification_data = setup_benchmark_data(num_signatures);
     println!();
 
     // 2. Jolt Compilation and Preprocessing
@@ -163,7 +202,7 @@ pub fn main() {
     println!("----------------------------------------------------");
     println!(
         "Executing guest program inside zkVM to verify all {} signatures...",
-        NUM_SIGNATURES
+        num_signatures
     );
     println!("The guest program:");
     println!("  1. Receives the aggregation batch as input");
@@ -183,7 +222,7 @@ pub fn main() {
     );
     println!(
         "✓ Proving throughput: {:.2} signatures/second",
-        NUM_SIGNATURES as f64 / prove_time.as_secs_f64()
+        num_signatures as f64 / prove_time.as_secs_f64()
     );
     println!();
 
@@ -199,7 +238,7 @@ pub fn main() {
 
     // Calculate individual signature size
     // XMSS signature with Poseidon ≈ 2 KB per signature
-    let individual_sig_size_kb = NUM_SIGNATURES * 2;
+    let individual_sig_size_kb = num_signatures * 2;
     let space_saved_kb = individual_sig_size_kb as f64 - proof_size_kb_estimate;
     let space_saved_percent = (space_saved_kb / individual_sig_size_kb as f64) * 100.0;
 
@@ -233,12 +272,12 @@ pub fn main() {
     println!("Verifying the zkVM proof cryptographically...");
     println!(
         "This proves that all {} signatures were correctly verified",
-        NUM_SIGNATURES
+        num_signatures
     );
     println!("without re-executing the guest program.");
     println!();
     let start_verify = Instant::now();
-    let verification_data_for_verify = setup_benchmark_data();
+    let verification_data_for_verify = setup_benchmark_data(num_signatures);
     let is_valid = verify_verify_aggregation(
         verification_data_for_verify,
         verified_count,
@@ -256,7 +295,7 @@ pub fn main() {
     println!("═══════════════════════════════════════════════════");
     println!();
     println!("Batch Configuration:");
-    println!("  • Batch Size:        {} signatures", NUM_SIGNATURES);
+    println!("  • Batch Size:        {} signatures", num_signatures);
     println!("  • Verified Count:    {} signatures", verified_count);
     println!();
     println!("Performance Metrics:");
@@ -264,7 +303,7 @@ pub fn main() {
     println!("  • Proof Verification: {:?}", verify_time);
     println!(
         "  • Proving Throughput: {:.2} sigs/sec",
-        NUM_SIGNATURES as f64 / prove_time.as_secs_f64()
+        num_signatures as f64 / prove_time.as_secs_f64()
     );
     println!(
         "  • Speedup Factor:    {:.2}x",
@@ -296,7 +335,7 @@ pub fn main() {
     println!("  ✓ Post-quantum security (XMSS with Poseidon)");
     println!(
         "  ✓ Succinct proof replaces {} individual signatures",
-        NUM_SIGNATURES
+        num_signatures
     );
     println!();
     println!("═══════════════════════════════════════════════════");

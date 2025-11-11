@@ -205,7 +205,11 @@ mod tests {
     // Validation tests
     #[test]
     fn test_validate_valid() {
-        let items = vec![create_test_item(0), create_test_item(1), create_test_item(2)];
+        let items = vec![
+            create_test_item(0),
+            create_test_item(1),
+            create_test_item(2),
+        ];
 
         assert!(validate(&items).is_ok());
     }
@@ -346,7 +350,11 @@ mod tests {
     // Batch aggregation tests
     #[test]
     fn test_aggregate_success() {
-        let items = vec![create_test_item(0), create_test_item(1), create_test_item(2)];
+        let items = vec![
+            create_test_item(0),
+            create_test_item(1),
+            create_test_item(2),
+        ];
 
         let result = aggregate(items);
         assert!(result.is_ok());

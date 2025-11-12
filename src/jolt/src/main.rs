@@ -183,6 +183,10 @@ pub fn main() {
         num_signatures - 1
     );
     let verification_data = setup_benchmark_data(num_signatures);
+    let verification_bytes =
+        bincode::serialize(&verification_data).expect("failed to encode batch for prover");
+    let verification_data_for_verify: AggregationBatch =
+        bincode::deserialize(&verification_bytes).expect("failed to decode batch for verifier");
     println!();
 
     // 2. Jolt Compilation and Preprocessing
@@ -290,7 +294,6 @@ pub fn main() {
     println!("without re-executing the guest program.");
     println!();
     let start_verify = Instant::now();
-    let verification_data_for_verify = setup_benchmark_data(num_signatures);
     let is_valid = verify_verify_aggregation(
         verification_data_for_verify,
         verified_count,

@@ -30,6 +30,20 @@ cargo run --manifest-path src/jolt/Cargo.toml --release
 
 # Run with custom batch size (e.g., 2 signatures for quick testing)
 NUM_SIGNATURES_OVERRIDE=2 cargo run --manifest-path src/jolt/Cargo.toml --release
+
+# Use lightweight phony XMSS keys for benchmark-only runs
+PHONY_KEYS=1 cargo run --manifest-path src/jolt/Cargo.toml --release
+# or pass --phony-keys to the binary for the same behavior
+```
+
+> **Warning**
+>
+> Phony XMSS keys keep the guest logic identical but replace the Merkle path with
+> randomized data to speed up dataset generation. They exist **only** for local
+> benchmarking; never use this mode for real proofs or security-sensitive runs.
+
+Phony and real batches are cached separately under `tmp/benchmark_data_{real|phony}*.bin`
+so you can switch between them without accidental reuse.
 ```
 
 ### Clean Cache and Re-run

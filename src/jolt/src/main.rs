@@ -1,5 +1,7 @@
 use std::{env, fs, path::Path, time::Instant};
 
+mod phony_xmss;
+
 use hashsig::{
     signature::{
         generalized_xmss::instantiations_poseidon::lifetime_2_to_the_18::winternitz::SIGWinternitzLifetime18W1,
@@ -10,6 +12,12 @@ use hashsig::{
 use rayon::{iter::IntoParallelIterator, prelude::*};
 
 const DEFAULT_NUM_SIGNATURES: usize = 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KeyMaterialStrategy {
+    Real,
+    Phony,
+}
 
 fn benchmark_batch_size() -> usize {
     match env::var("NUM_SIGNATURES_OVERRIDE") {
@@ -33,21 +41,54 @@ fn benchmark_batch_size() -> usize {
     }
 }
 
+fn benchmark_key_strategy() -> KeyMaterialStrategy {
+    let cli_requests_phony = env::args().skip(1).any(|arg| arg == "--phony-keys");
+    if cli_requests_phony {
+        return KeyMaterialStrategy::Phony;
+    }
+
+    match env::var("PHONY_KEYS") {
+        Ok(raw) if matches!(raw.trim(), "1" | "true" | "TRUE" | "True") => {
+            KeyMaterialStrategy::Phony
+        }
+        _ => KeyMaterialStrategy::Real,
+    }
+}
+
+fn cache_file_path(num_signatures: usize, strategy: KeyMaterialStrategy) -> String {
+    let cache_dir = "./tmp";
+    let label = strategy_label(strategy);
+    if num_signatures == DEFAULT_NUM_SIGNATURES {
+        format!("{cache_dir}/benchmark_data_{label}.bin")
+    } else {
+        format!("{cache_dir}/benchmark_data_{label}_{num_signatures}.bin")
+    }
+}
+
+fn strategy_label(strategy: KeyMaterialStrategy) -> &'static str {
+    match strategy {
+        KeyMaterialStrategy::Real => "real",
+        KeyMaterialStrategy::Phony => "phony",
+    }
+}
+
+fn deterministic_message(index: usize) -> [u8; MESSAGE_LENGTH] {
+    std::array::from_fn(|offset| (index + offset) as u8)
+}
+
 // Use the guest types directly to avoid duplication
 use guest::{AggregationBatch, VerificationItem};
+use phony_xmss::generate_phony_item;
 
 /// Generates or loads cached public key and 100 signatures to be verified.
-fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
+fn setup_benchmark_data(num_signatures: usize, strategy: KeyMaterialStrategy) -> AggregationBatch {
     let cache_dir = "./tmp";
-    let cache_file = if num_signatures == DEFAULT_NUM_SIGNATURES {
-        "./tmp/benchmark_data.bin".to_string()
-    } else {
-        format!("./tmp/benchmark_data_{}.bin", num_signatures)
-    };
+    let cache_file = cache_file_path(num_signatures, strategy);
+    let strategy_tag = strategy_label(strategy);
 
     // Try to load from cache first
     if Path::new(&cache_file).exists() {
-        println!("Loading benchmark data from cache...");
+        println!("Loading {strategy_tag} benchmark data from cache...");
         let start = Instant::now();
 
         match fs::read(&cache_file) {
@@ -86,45 +127,42 @@ fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
     }
 
     println!(
-        "Generating fresh benchmark data: {} signatures...",
+        "Generating fresh {strategy_tag} benchmark data: {} signatures...",
         num_signatures
     );
     let start = Instant::now();
-    let mut rng = rand::rng();
 
-    // Generate a key active only for the epochs we need, making this step fast.
-    let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, num_signatures);
+    let items: Vec<VerificationItem> = match strategy {
+        KeyMaterialStrategy::Real => {
+            let mut rng = rand::rng();
+            let (pk, sk) = SIGWinternitzLifetime18W1::key_gen(&mut rng, 0, num_signatures);
+            let pk_bytes = bincode::serialize(&pk).expect("Failed to serialize public key");
 
-    // Serialize public key once for cloning
-    let pk_bytes = bincode::serialize(&pk).expect("Failed to serialize public key");
+            (0..num_signatures)
+                .into_par_iter()
+                .map(|i| {
+                    let epoch = i as u32;
+                    let message = deterministic_message(i);
+                    let signature = SIGWinternitzLifetime18W1::sign(&sk, epoch, &message)
+                        .expect("Signing failed");
 
-    // Generate 1000 signatures in parallel for speed.
-    // Each item includes its own copy of the public key
-    let items: Vec<VerificationItem> = (0..num_signatures)
-        .into_par_iter()
-        .map(|i| {
-            let epoch = i as u32;
-            let message: [u8; MESSAGE_LENGTH] = (0..MESSAGE_LENGTH)
-                .map(|b| (i + b) as u8)
-                .collect::<Vec<u8>>()
-                .try_into()
-                .unwrap();
+                    let pk_clone =
+                        bincode::deserialize(&pk_bytes).expect("Failed to deserialize public key");
 
-            let signature =
-                SIGWinternitzLifetime18W1::sign(&sk, epoch, &message).expect("Signing failed");
-
-            // Clone public key via serialization for this item
-            let pk_clone =
-                bincode::deserialize(&pk_bytes).expect("Failed to deserialize public key");
-
-            VerificationItem {
-                message,
-                epoch,
-                signature,
-                public_key: pk_clone, // Each item has its own public key
-            }
-        })
-        .collect();
+                    VerificationItem {
+                        message,
+                        epoch,
+                        signature,
+                        public_key: pk_clone,
+                    }
+                })
+                .collect()
+        }
+        KeyMaterialStrategy::Phony => (0..num_signatures)
+            .into_par_iter()
+            .map(|i| generate_phony_item(i as u32, deterministic_message(i), i as u64))
+            .collect(),
+    };
 
     let aggregation_batch = AggregationBatch { items };
 
@@ -143,7 +181,7 @@ fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
             } else if let Err(e) = fs::write(&cache_file, &serialized_data) {
                 println!("Failed to write cache file: {}", e);
             } else {
-                println!("Benchmark data cached for future runs");
+                println!("Benchmark data cached for future {strategy_tag} runs");
             }
         }
         Err(e) => {
@@ -157,6 +195,16 @@ fn setup_benchmark_data(num_signatures: usize) -> AggregationBatch {
 
 pub fn main() {
     let num_signatures = benchmark_batch_size();
+    let key_strategy = benchmark_key_strategy();
+
+    match key_strategy {
+        KeyMaterialStrategy::Real => {
+            println!("Using real XMSS key material (secure default)");
+        }
+        KeyMaterialStrategy::Phony => {
+            println!("⚠ Using phony XMSS key material for benchmarking only");
+        }
+    }
 
     println!("XMSS Signature Aggregation Benchmark - Jolt zkVM");
     println!("===================================================");
@@ -182,7 +230,7 @@ pub fn main() {
         "Each signature is created with a unique epoch (0-{}).",
         num_signatures - 1
     );
-    let verification_data = setup_benchmark_data(num_signatures);
+    let verification_data = setup_benchmark_data(num_signatures, key_strategy);
     let verification_bytes =
         bincode::serialize(&verification_data).expect("failed to encode batch for prover");
     let verification_data_for_verify: AggregationBatch =

@@ -4,6 +4,8 @@ Post-quantum signature aggregation system that enables efficient batch verificat
 
 ## Benchmark Results Summary
 
+**Environment**: MacBook Air (M1, 8-core, 16 GB RAM)
+
 | Metric                 | Batch Size: 1    | Batch Size: 2    |
 |------------------------|------------------|------------------|
 | Proof Generation       | 434.95s          | 574.35s          |

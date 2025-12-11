@@ -1,4 +1,9 @@
-use std::{env, fs, path::Path, time::Instant};
+use std::{
+    env, fs, io,
+    io::Read,
+    path::{Path, PathBuf},
+    time::{Duration, Instant, UNIX_EPOCH},
+};
 
 mod phony_xmss;
 
@@ -10,14 +15,22 @@ use hashsig::{
     MESSAGE_LENGTH,
 };
 use rayon::{iter::IntoParallelIterator, prelude::*};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use jolt_sdk::{JoltProverPreprocessing, JoltVerifierPreprocessing, Serializable};
 
 const DEFAULT_NUM_SIGNATURES: usize = 100;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum KeyMaterialStrategy {
     Real,
     Phony,
 }
+
+const SMALL_PCS_CACHE_BATCH_SIZE: usize = 2;
+const PCS_CACHE_PREFIX: &str = "pcs_preprocessing_small";
+const URS_FILENAME: &str = "dory_urs_33_variables.urs";
 
 fn benchmark_batch_size() -> usize {
     match env::var("NUM_SIGNATURES_OVERRIDE") {
@@ -74,6 +87,26 @@ fn strategy_label(strategy: KeyMaterialStrategy) -> &'static str {
 
 fn deterministic_message(index: usize) -> [u8; MESSAGE_LENGTH] {
     std::array::from_fn(|offset| (index + offset) as u8)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct PcsCacheMetadata {
+    guest_hash: [u8; 32],
+    urs_timestamp: u64,
+    strategy: KeyMaterialStrategy,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PcsCacheBundle {
+    metadata: PcsCacheMetadata,
+    prover_bytes: Vec<u8>,
+    verifier_bytes: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct PcsCachePlan {
+    metadata: PcsCacheMetadata,
+    path: PathBuf,
 }
 
 // Use the guest types directly to avoid duplication
@@ -193,9 +226,173 @@ fn setup_benchmark_data(num_signatures: usize, strategy: KeyMaterialStrategy) ->
     aggregation_batch
 }
 
+fn build_pcs_cache_plan(strategy: KeyMaterialStrategy) -> io::Result<PcsCachePlan> {
+    let metadata = PcsCacheMetadata {
+        guest_hash: compute_guest_source_hash()?,
+        urs_timestamp: read_urs_timestamp()?,
+        strategy,
+    };
+
+    Ok(PcsCachePlan {
+        metadata,
+        path: pcs_cache_file_path(strategy),
+    })
+}
+
+fn pcs_cache_file_path(strategy: KeyMaterialStrategy) -> PathBuf {
+    Path::new("./tmp").join(format!(
+        "{PCS_CACHE_PREFIX}_{}.bin",
+        strategy_label(strategy)
+    ))
+}
+
+#[allow(clippy::type_complexity)]
+fn load_pcs_cache(
+    plan: &PcsCachePlan,
+) -> io::Result<
+    Option<(
+        JoltProverPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+        JoltVerifierPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+    )>,
+> {
+    let bytes = match fs::read(&plan.path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+
+    let bundle: PcsCacheBundle =
+        bincode::deserialize(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    if bundle.metadata != plan.metadata {
+        return Ok(None);
+    }
+
+    let prover =
+        <JoltProverPreprocessing<jolt_sdk::F, jolt_sdk::PCS> as Serializable>::deserialize_from_bytes(
+            &bundle.prover_bytes,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    let verifier =
+        <JoltVerifierPreprocessing<jolt_sdk::F, jolt_sdk::PCS> as Serializable>::deserialize_from_bytes(
+            &bundle.verifier_bytes,
+        )
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    Ok(Some((prover, verifier)))
+}
+
+fn store_pcs_cache(
+    plan: &PcsCachePlan,
+    prover: &JoltProverPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+    verifier: &JoltVerifierPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+) -> io::Result<()> {
+    if let Some(parent) = plan.path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let bundle = PcsCacheBundle {
+        metadata: plan.metadata.clone(),
+        prover_bytes: prover
+            .serialize_to_bytes()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+        verifier_bytes: verifier
+            .serialize_to_bytes()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+    };
+
+    let encoded =
+        bincode::serialize(&bundle).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let tmp_path = plan.path.with_extension("tmp");
+    fs::write(&tmp_path, encoded)?;
+    fs::rename(tmp_path, &plan.path)?;
+    Ok(())
+}
+
+fn compute_guest_source_hash() -> io::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    hash_guest_file(Path::new("src/jolt/guest/Cargo.toml"), &mut hasher)?;
+    hash_guest_sources(Path::new("src/jolt/guest/src"), &mut hasher)?;
+    Ok(hasher.finalize().into())
+}
+
+fn hash_guest_sources(path: &Path, hasher: &mut Sha256) -> io::Result<()> {
+    let mut entries: Vec<PathBuf> = fs::read_dir(path)?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+
+    for entry in entries {
+        if entry.is_dir() {
+            hash_guest_sources(&entry, hasher)?;
+        } else if entry.extension().is_some_and(|ext| ext == "rs") {
+            hash_guest_file(&entry, hasher)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn hash_guest_file(path: &Path, hasher: &mut Sha256) -> io::Result<()> {
+    let mut file = fs::File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    hasher.update(&buffer);
+    Ok(())
+}
+
+fn read_urs_timestamp() -> io::Result<u64> {
+    let metadata = fs::metadata(URS_FILENAME)?;
+    let modified = metadata.modified()?;
+    let duration = modified
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0));
+    Ok(duration.as_secs())
+}
+
 pub fn main() {
     let num_signatures = benchmark_batch_size();
     let key_strategy = benchmark_key_strategy();
+    let use_small_pcs_cache = num_signatures == SMALL_PCS_CACHE_BATCH_SIZE;
+    let mut pcs_cache_plan: Option<PcsCachePlan> = None;
+    let mut cached_preprocessing: Option<(
+        JoltProverPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+        JoltVerifierPreprocessing<jolt_sdk::F, jolt_sdk::PCS>,
+    )> = None;
+
+    if use_small_pcs_cache {
+        match build_pcs_cache_plan(key_strategy) {
+            Ok(plan) => {
+                match load_pcs_cache(&plan) {
+                    Ok(Some(preprocessing)) => {
+                        println!(
+                            "PCS preprocessing cache hit for 2-signature run ({}).",
+                            plan.path.display()
+                        );
+                        cached_preprocessing = Some(preprocessing);
+                    }
+                    Ok(None) => {
+                        println!(
+                            "PCS preprocessing cache unavailable or stale ({}); regenerating.",
+                            plan.path.display()
+                        );
+                    }
+                    Err(err) => {
+                        println!(
+                            "Failed to load PCS preprocessing cache ({}): {}",
+                            plan.path.display(),
+                            err
+                        );
+                    }
+                }
+                pcs_cache_plan = Some(plan);
+            }
+            Err(err) => {
+                println!("PCS preprocessing cache disabled: {}", err);
+            }
+        }
+    }
 
     match key_strategy {
         KeyMaterialStrategy::Real => {
@@ -246,11 +443,36 @@ pub fn main() {
     let target_dir = "/tmp/jolt-guest-targets";
     let mut program = guest::compile_verify_aggregation(target_dir);
 
-    println!("Preprocessing prover and verifier data structures...");
-    println!("This generates commitment keys and other cryptographic parameters.");
-    let prover_preprocessing = guest::preprocess_prover_verify_aggregation(&mut program);
-    let verifier_preprocessing =
-        guest::verifier_preprocessing_from_prover_verify_aggregation(&prover_preprocessing);
+    let (prover_preprocessing, verifier_preprocessing) =
+        if let Some((prover, verifier)) = cached_preprocessing {
+            if let Some(plan) = pcs_cache_plan.as_ref() {
+                println!(
+                    "Using cached PCS preprocessing bundle from {}",
+                    plan.path.display()
+                );
+            } else {
+                println!("Using cached PCS preprocessing bundle");
+            }
+            (prover, verifier)
+        } else {
+            println!("Preprocessing prover and verifier data structures...");
+            println!("This generates commitment keys and other cryptographic parameters.");
+            let prover = guest::preprocess_prover_verify_aggregation(&mut program);
+            let verifier = guest::verifier_preprocessing_from_prover_verify_aggregation(&prover);
+
+            if let Some(plan) = pcs_cache_plan.as_ref() {
+                match store_pcs_cache(plan, &prover, &verifier) {
+                    Ok(()) => println!("PCS preprocessing cache saved to {}", plan.path.display()),
+                    Err(err) => println!(
+                        "Failed to update PCS preprocessing cache ({}): {}",
+                        plan.path.display(),
+                        err
+                    ),
+                }
+            }
+
+            (prover, verifier)
+        };
     println!(
         "✓ zkVM preprocessing complete in {:?}",
         start_preprocess.elapsed()

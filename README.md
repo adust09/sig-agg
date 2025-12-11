@@ -2,6 +2,15 @@
 
 Post-quantum signature aggregation system that enables efficient batch verification of XMSS signatures using Jolt zkVM, producing constant-size proofs regardless of batch size.
 
+## Benchmark Results Summary
+
+| Metric                 | Batch Size: 1    | Batch Size: 2    |
+|------------------------|------------------|------------------|
+| Proof Generation       | 434.95s          | 574.35s          |
+| Proof Verification     | 256.79ms         | 300.37ms         |
+| Raw signatures| ~2 KB            | ~4 KB            |
+| Proof size       | ~650 KB| ~650 KB|
+
 ## Quick Start
 
 All commands assume execution from the project root directory.
@@ -42,23 +51,13 @@ PHONY_KEYS=1 cargo run --manifest-path src/jolt/Cargo.toml --release
 > randomized data to speed up dataset generation. They exist **only** for local
 > benchmarking; never use this mode for real proofs or security-sensitive runs.
 
+> **Note**
+>
+> Runs with `NUM_SIGNATURES_OVERRIDE=2` cache the Dory PCS preprocessing bundle
+> under `tmp/pcs_preprocessing_small_{strategy}.bin`. The cache is reused only
+> when the guest sources and URS file (`dory_urs_33_variables.urs`) are
+> unchanged; delete the file or bump the batch size to force regeneration.
+
 Phony and real batches are cached separately under `tmp/benchmark_data_{real|phony}*.bin`
 so you can switch between them without accidental reuse.
 ```
-
-### Clean Cache and Re-run
-
-```bash
-# Remove cached URS files and benchmark data
-rm -rf dory_urs_*.urs tmp/
-
-# Re-run benchmark (will regenerate caches)
-NUM_SIGNATURES_OVERRIDE=2 cargo run --manifest-path src/jolt/Cargo.toml --release
-```
-
-## Configuration
-
-- **Batch size**: Set via `NUM_SIGNATURES_OVERRIDE` environment variable (default: 100)
-- **Max trace length**: Configured in `src/jolt/guest/src/lib.rs` as `max_trace_length = 33_554_432` (2^25)
-- **Memory size**: 8 MB for guest program
-- **XMSS variant**: Lifetime 2^18 with Poseidon hashing

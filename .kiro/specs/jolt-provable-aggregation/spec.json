@@ -1,0 +1,22 @@
+{
+  "feature_name": "jolt-provable-aggregation",
+  "created_at": "2025-11-02T02:31:44Z",
+  "updated_at": "2025-11-03T00:25:00Z",
+  "language": "en",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": false
+    }
+  },
+  "ready_for_implementation": false
+}
